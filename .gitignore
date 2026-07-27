@@ -1,0 +1,21 @@
+node_modules/
+
+# Playwright output
+playwright-report/
+test-results/
+blob-report/
+artifacts/
+
+# Local credentials and authenticated browser state
+*.wvd
+remote.json
+storage-state*.json
+auth.json
+.env
+.env.*
+!.env.example
+
+# Local logs and operating-system files
+*.log
+.DS_Store
+Thumbs.db

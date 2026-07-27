@@ -1,0 +1,20 @@
+{
+  "name": "widevine-proxy2-automation",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Playwright channel and playback health monitoring",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "monitor": "node monitor.js",
+    "check": "node --check monitor.js && node --check automation/config.js && node --check automation/channel-health.js && node --check automation/drm-observer.js && node --check automation/manifest-tracker.js && node automation/channel-health.test.js",
+    "test": "node automation/channel-health.test.js"
+  },
+  "dependencies": {
+    "playwright": "1.54.1",
+    "playwright-extra": "4.3.6",
+    "puppeteer-extra-plugin-stealth": "2.11.2"
+  }
+}

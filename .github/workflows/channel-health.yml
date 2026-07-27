@@ -1,0 +1,59 @@
+name: Stream channel health
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: channel-health-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BROWSER_CHANNEL: chrome
+      CHANNEL_TIMEOUT_MS: "90000"
+      FAIL_ON_UNHEALTHY: "false"
+      HEADLESS: "true"
+      PLAYER_MODE: default
+      HEALTH_REPORT_ENDPOINT: ${{ secrets.HEALTH_REPORT_ENDPOINT }}
+      HEALTH_REPORT_TOKEN: ${{ secrets.HEALTH_REPORT_TOKEN }}
+      PLAYWRIGHT_STORAGE_STATE_BASE64: ${{ secrets.PLAYWRIGHT_STORAGE_STATE_BASE64 }}
+      TARGET_CHANNELS: ${{ vars.TARGET_CHANNELS }}
+      TARGET_STREAM_URL: https://streamninja.cloud/
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Install Playwright Chromium dependencies
+        run: npx playwright install --with-deps chromium
+
+      - name: Validate JavaScript
+        run: npm run check
+
+      - name: Run channel health monitor
+        run: npm run monitor
+
+      - name: Upload health report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: channel-health-${{ github.run_id }}
+          path: artifacts/channel-health.json
+          if-no-files-found: warn
+          retention-days: 14

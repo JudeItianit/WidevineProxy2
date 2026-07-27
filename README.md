@@ -19,6 +19,72 @@ This addon requires a Widevine Device file to work, which is not provided by thi
 + Compatible (tested) browsers: Firefox/Chrome on Windows/Linux.
 + Works with any service that accepts challenges from Android devices on the same endpoint.
 
+## Playwright channel health monitoring
+
+The repository includes a monitoring-only Playwright command for checking the SKY GO section on StreamNinja. It discovers the watch-page cards, finds the configured channel sources, clicks the matching source to start playback, and records whether a DASH manifest and initialized video element were observed. By default, `PLAYER_MODE=default` leaves the site's current player (normally Bitmovin) untouched. Set `PLAYER_MODE=shaka` only when a Shaka-specific comparison is required. The source click is authoritative and the monitor waits up to 90 seconds by default. The separate Play control is disabled unless `PLAY_FALLBACK_ENABLED=true`; when enabled, it is only used after `PLAY_FALLBACK_DELAY_MS`.
+
+The monitor does not load the extension interception code, use a WVD or remote CDM, or extract keys. It does include the final playable MPD URL in `manifest.fileName` so an authenticated receiver can synchronize that URL to a channel database. Treat reports and workflow artifacts as sensitive because MPD URLs can contain query-string credentials.
+
+For DRM diagnostics, the report includes passive lifecycle counters such as the requested key-system name, media-key sessions created, license challenges generated, and successful session updates. It never reads or stores challenge bodies, license bodies, KIDs, or content keys.
+
+Manifest reporting prefers the successful response after redirects. It records the host, final HTTP status, full MPD URL in `fileName`, and a non-reversible URL fingerprint.
+
+### Local setup
+
+Requirements:
+
+- Node.js 20 or newer
+- Google Chrome, with Playwright Chromium as a fallback
+
+Install the dependencies and Playwright browser support:
+
+```shell
+npm install
+npx playwright install chromium
+```
+
+The monitor automatically loads `.env` from the repository root when it exists. `.env.example` is only a committed template and is never read as configuration. Shell and GitHub Actions environment variables take precedence over values in `.env`. `TARGET_STREAM_URL` defaults to `https://streamninja.cloud/`, and `TARGET_CHANNELS` defaults to ESPN NZ, ESPN 2 NZ, Sky Sport 1-9 NZ, and Sky Sport Select NZ.
+
+Set `HEADLESS=false` in `.env` to display the automated browser locally.
+
+Card discovery retries the home page when the SKY GO section has not populated. `DISCOVERY_MAX_PASSES` controls polling and scrolling per attempt, while `DISCOVERY_RETRIES` controls complete home-page reload attempts. An empty section is reported as a discovery error instead of incorrectly marking every channel `not_found`.
+
+Run the monitor:
+
+```shell
+npm run monitor
+```
+
+The report is written to `artifacts/channel-health.json` by default. It contains one entry per requested channel:
+
+```json
+{
+  "channel": "SKY SPORT 7 NZ",
+  "status": "healthy",
+  "manifest": {
+    "available": true,
+    "type": "DASH",
+    "fileName": "https://media.example/live/manifest.mpd?token=example",
+    "host": "media.example",
+    "httpOk": true,
+    "status": 200
+  },
+  "playback": {
+    "initialized": true,
+    "videoElements": 1,
+    "videoErrors": []
+  }
+}
+```
+
+Set `HEALTH_REPORT_ENDPOINT` to POST the same JSON report to an HTTPS endpoint. `HEALTH_REPORT_TOKEN` is sent as a bearer token and should be required by the receiving server. `FAIL_ON_UNHEALTHY=true` makes the command return a failure status when any requested channel is not healthy.
+
+### GitHub Actions
+
+The `Channel health monitor` workflow runs every six hours and can also be started manually. Each run uploads `channel-health.json` as a 14-day workflow artifact.
+
+For database synchronization, set `HEALTH_REPORT_ENDPOINT` to `https://your-server.example/api/channel-health/report` and set `HEALTH_REPORT_TOKEN` to the same long random value configured as `CHANNEL_HEALTH_REPORT_TOKEN` on the Laravel server. `PLAYWRIGHT_STORAGE_STATE_BASE64` remains optional. `TARGET_CHANNELS` can be overridden with a repository variable containing a comma-separated list. Device files, `remote.json`, storage state, local reports, and environment files remain ignored by Git.
+
 ## Installation
 + Chrome
   1. Download the ZIP file from the [releases section](https://github.com/DevLARLEY/WidevineProxy2/releases)

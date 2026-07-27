@@ -1,0 +1,626 @@
+import { createHash } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
+
+import { ManifestTracker } from "./manifest-tracker.js";
+import { collectDrmLifecycle } from "./drm-observer.js";
+
+const TARGET_ALIASES = new Map([
+  ["ESPN NZ", new Set(["ESPN", "ESPN NZ"])],
+]);
+
+export function isDrmRelatedText(value) {
+  return /\b(?:drm|widevine|eme|license|key system)\b/i.test(String(value));
+}
+
+export function isIgnoredRequestNoise(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "chrome-extension:"
+      || parsed.hostname === "adsco.re"
+      || parsed.hostname.endsWith(".adsco.re");
+  } catch {
+    return false;
+  }
+}
+
+export function isBenignRequestFailure(errorText) {
+  return String(errorText).trim().toUpperCase() === "NET::ERR_ABORTED";
+}
+
+export function normalizeName(value) {
+  return String(value)
+    .normalize("NFKC")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function shortText(value) {
+  return String(value)
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function sameChannel(actual, target) {
+  const normalizedActual = normalizeName(actual);
+  const normalizedTarget = normalizeName(target);
+  const aliases = TARGET_ALIASES.get(normalizedTarget);
+  return normalizedActual === normalizedTarget || aliases?.has(normalizedActual) || false;
+}
+
+function publicPageId(url) {
+  const parsed = new URL(url);
+  return createHash("sha256").update(parsed.pathname).digest("hex").slice(0, 12);
+}
+
+async function resilientClick(locator, timeoutMs = 5_000) {
+  await locator.scrollIntoViewIfNeeded().catch(() => {});
+  try {
+    await locator.click({ timeout: timeoutMs });
+    return "pointer";
+  } catch (pointerError) {
+    try {
+      await locator.evaluate((node) => {
+        const clickable = node.closest(
+          'button, [role="button"], [role="menuitem"], [role="option"]',
+        ) || node;
+        clickable.click();
+      });
+      return "dom";
+    } catch {
+      throw pointerError;
+    }
+  }
+}
+
+async function clickVisible(locators, timeoutMs = 5_000) {
+  for (const locator of locators) {
+    const count = await locator.count().catch(() => 0);
+    for (let index = 0; index < count; index += 1) {
+      const candidate = locator.nth(index);
+      if (await candidate.isVisible().catch(() => false)) {
+        await resilientClick(candidate, timeoutMs);
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+export function discoveryIsStable(cardCount, stablePasses, requiredStablePasses) {
+  return cardCount > 0 && stablePasses >= requiredStablePasses;
+}
+
+export async function discoverSkyGoCards(page, config, log) {
+  const cards = new Map();
+
+  for (let attempt = 1; attempt <= config.discoveryRetries; attempt += 1) {
+    await page.goto(config.targetUrl, {
+      timeout: config.navigationTimeoutMs,
+      waitUntil: "domcontentloaded",
+    });
+    await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => {});
+
+    const toggle = page.getByRole("button", { name: /toggle sky go/i }).first();
+    await toggle.waitFor({ state: "visible", timeout: config.navigationTimeoutMs });
+    await toggle.scrollIntoViewIfNeeded();
+    if ((await toggle.getAttribute("aria-expanded")) === "false") {
+      await resilientClick(toggle, 3_000);
+    }
+
+    const section = page.locator("section").filter({
+      has: page.getByRole("button", { name: /toggle sky go/i }),
+    }).first();
+    let stablePasses = 0;
+    let previousCount = -1;
+
+    for (
+      let pass = 0;
+      pass < config.discoveryMaxPasses && cards.size < config.maxCards;
+      pass += 1
+    ) {
+      const found = await page.locator('a[href*="/stream/skygo/"]').evaluateAll((links) => (
+        links.map((link) => ({
+          href: link.href,
+          label: [
+            link.querySelector("img")?.alt,
+            ...[...link.querySelectorAll("p")].map((node) => node.textContent),
+          ].filter(Boolean).join(" | "),
+        }))
+      ));
+
+      for (const card of found) {
+        cards.set(card.href, card);
+      }
+
+      stablePasses = cards.size > 0 && cards.size === previousCount
+        ? stablePasses + 1
+        : 0;
+      previousCount = cards.size;
+      if (discoveryIsStable(cards.size, stablePasses, config.discoveryStablePasses)) {
+        break;
+      }
+
+      if (pass % 4 === 0) {
+        await section.evaluate((node) => node.scrollIntoView({ block: "end" }));
+      } else {
+        await page.mouse.wheel(0, 900);
+      }
+      await delay(config.discoveryScrollDelayMs);
+    }
+
+    if (cards.size > 0) {
+      break;
+    }
+    log.warn(
+      `SKY GO cards did not populate on home-page attempt `
+      + `${attempt}/${config.discoveryRetries}; retrying.`,
+    );
+  }
+
+  const result = [...cards.values()].slice(0, config.maxCards);
+  if (result.length === 0) {
+    throw new Error(
+      `The SKY GO section loaded, but no watch-page cards appeared after `
+      + `${config.discoveryRetries} attempt(s)`,
+    );
+  }
+  log.info(`Discovered ${result.length} unique SKY GO watch page(s).`);
+  return result;
+}
+
+class ProbeDiagnostics {
+  constructor(page, log) {
+    this.page = page;
+    this.log = log;
+    this.errors = [];
+    this.manifests = new ManifestTracker({
+      onCapture: ({ host, status, type }) => {
+        log.info(`Observed ${type} manifest from ${host} (HTTP ${status}).`);
+      },
+    });
+
+    this.onConsole = (message) => {
+      const drmRelated = isDrmRelatedText(message.text());
+      if (message.type() === "error" || drmRelated) {
+        this.record("console", message.text(), drmRelated);
+      }
+    };
+    this.onPageError = (error) => this.record("page", error.message, true);
+    this.onRequestFailed = (request) => {
+      if (isIgnoredRequestNoise(request.url())) {
+        return;
+      }
+      if (
+        ["document", "xhr", "fetch", "media"].includes(request.resourceType())
+        || /drm|widevine|eme|license|manifest|\.mpd/i.test(request.url())
+      ) {
+        const errorText = request.failure()?.errorText || "request failed";
+        this.record(
+          "request",
+          `${errorText}: ${request.url()}`,
+          !isBenignRequestFailure(errorText),
+        );
+      }
+    };
+    this.onResponse = (response) => {
+      if (isIgnoredRequestNoise(response.url())) {
+        return;
+      }
+      this.manifests.track(response);
+      if (response.status() >= 400) {
+        const request = response.request();
+        if (
+          ["document", "xhr", "fetch", "media"].includes(request.resourceType())
+          || /drm|widevine|eme|license|manifest|\.mpd/i.test(response.url())
+        ) {
+          this.record("http", `HTTP ${response.status()}: ${response.url()}`, true);
+        }
+      }
+    };
+  }
+
+  start() {
+    this.page.on("console", this.onConsole);
+    this.page.on("pageerror", this.onPageError);
+    this.page.on("requestfailed", this.onRequestFailed);
+    this.page.on("response", this.onResponse);
+  }
+
+  async stop() {
+    this.page.off("console", this.onConsole);
+    this.page.off("pageerror", this.onPageError);
+    this.page.off("requestfailed", this.onRequestFailed);
+    this.page.off("response", this.onResponse);
+    await this.manifests.flush();
+  }
+
+  record(kind, message, material = false) {
+    const clean = shortText(message);
+    if (!clean || this.errors.some((error) => error.kind === kind && error.message === clean)) {
+      return;
+    }
+    if (this.errors.length < 25) {
+      this.errors.push({
+        drmRelated: isDrmRelatedText(clean),
+        kind,
+        material,
+        message: clean,
+      });
+    }
+  }
+}
+
+function playerButtonLocator(page) {
+  return page.getByRole("button").filter({
+    has: page.getByText("Player", { exact: true }),
+  }).first();
+}
+
+async function readActivePlayer(page) {
+  const playerButton = playerButtonLocator(page);
+  await playerButton.waitFor({ state: "visible", timeout: 15_000 }).catch(() => {});
+  const label = await playerButton.locator("span.text-zinc-200").textContent().catch(() => "");
+  return label?.replace(/\s+/g, " ").trim() || undefined;
+}
+
+async function selectShaka(page, log) {
+  const playerButton = playerButtonLocator(page);
+  await playerButton.waitFor({ state: "visible", timeout: 15_000 });
+  const clickMethod = await resilientClick(playerButton, 5_000);
+  if (clickMethod === "dom") {
+    log.warn("The Player control was overlay-blocked; used a DOM click fallback.");
+  }
+
+  const selected = await clickVisible([
+    page.getByRole("menuitem", { name: /^shaka(?: player)?$/i }),
+    page.getByRole("option", { name: /^shaka(?: player)?$/i }),
+    page.getByRole("button", { name: /^shaka(?: player)?$/i }),
+    page.getByText(/^shaka(?: player)?$/i),
+  ]);
+  return selected;
+}
+
+async function preparePlayer(page, config, log) {
+  const before = await readActivePlayer(page);
+  if (config.playerMode === "default") {
+    log.info(`Using the current site player${before ? ` (${before})` : ""}.`);
+    return {
+      active: before || null,
+      changed: false,
+      ready: true,
+      requested: "Site default",
+      selected: true,
+    };
+  }
+
+  log.info("Selecting the Shaka player.");
+  const selected = await selectShaka(page, log);
+  if (config.sourceSettleMs > 0) {
+    await delay(config.sourceSettleMs);
+  }
+  const active = await readActivePlayer(page);
+  return {
+    active: active || null,
+    changed: true,
+    ready: selected,
+    requested: "Shaka",
+    selected,
+  };
+}
+
+async function readSourceLabels(page) {
+  const labels = page.locator(".stream-source-btn span.min-w-0.truncate");
+  await labels.first().waitFor({
+    state: "visible",
+    timeout: 15_000,
+  }).catch(() => {});
+
+  return labels.evaluateAll((spans) => (
+    spans.map((span) => span.textContent?.replace(/\s+/g, " ").trim()).filter(Boolean)
+  ));
+}
+
+async function selectSource(page, targetName, log) {
+  const labels = page.locator(".stream-source-btn span.min-w-0.truncate");
+  const count = await labels.count();
+  for (let index = 0; index < count; index += 1) {
+    const labelSpan = labels.nth(index);
+    const label = await labelSpan.textContent().catch(() => "");
+    if (sameChannel(label, targetName)) {
+      await labelSpan.scrollIntoViewIfNeeded();
+      const clickMethod = await resilientClick(labelSpan, 3_000);
+      if (clickMethod === "dom") {
+        log.warn(`The ${targetName} source control was overlay-blocked; used a DOM click fallback.`);
+      }
+      return label.replace(/\s+/g, " ").trim();
+    }
+  }
+  return undefined;
+}
+
+async function requestPlaybackFallback(page) {
+  const playClicked = await clickVisible([
+    page.getByRole("button", { name: /^play$/i }),
+    page.locator('button[aria-label*="play" i]'),
+  ]).catch(() => false);
+
+  let videoCount = 0;
+  for (const frame of page.frames()) {
+    videoCount += await frame.evaluate(async () => {
+      const videos = [...document.querySelectorAll("video")];
+      await Promise.allSettled(videos.map(async (video) => {
+        video.muted = true;
+        await video.play();
+      }));
+      return videos.length;
+    }).catch(() => 0);
+  }
+  return { playClicked, videoCount };
+}
+
+async function playbackSnapshot(page) {
+  const snapshots = [];
+  for (const frame of page.frames()) {
+    const frameSnapshots = await frame.evaluate(() => (
+      [...document.querySelectorAll("video")].map((video) => ({
+        currentTime: Number(video.currentTime.toFixed(3)),
+        ended: video.ended,
+        error: video.error ? {
+          code: video.error.code,
+          message: video.error.message || undefined,
+        } : null,
+        paused: video.paused,
+        readyState: video.readyState,
+      }))
+    )).catch(() => []);
+    snapshots.push(...frameSnapshots);
+  }
+  return snapshots;
+}
+
+async function waitForHealthSignal(page, diagnostics, timeoutMs) {
+  const startedAt = Date.now();
+  let firstTimes;
+  let latest = [];
+
+  while (Date.now() - startedAt < timeoutMs) {
+    latest = await playbackSnapshot(page);
+    firstTimes ??= latest.map(({ currentTime }) => currentTime);
+    const initialized = latest.some((video, index) => (
+      !video.ended
+      && !video.error
+      && video.readyState >= 2
+      && (!video.paused || video.currentTime > (firstTimes[index] || 0))
+    ));
+    const dash = diagnostics.manifests.getDash();
+
+    if (initialized && dash) {
+      return { initialized, snapshots: latest };
+    }
+    if (diagnostics.errors.some(({ drmRelated }) => drmRelated) && dash) {
+      return { initialized, snapshots: latest };
+    }
+    await delay(500);
+  }
+
+  return {
+    initialized: latest.some((video) => !video.error && video.readyState >= 2 && !video.paused),
+    snapshots: latest,
+  };
+}
+
+export function shouldUsePlayFallback(playbackInitialized, dashManifest) {
+  return !playbackInitialized && !dashManifest;
+}
+
+export function determineChannelStatus({
+  dash,
+  playerReady,
+  playbackInitialized,
+  sourceSelected,
+}) {
+  if (!sourceSelected || !dash || !dash.ok) {
+    return "failed";
+  }
+  if (playerReady && playbackInitialized) {
+    return "healthy";
+  }
+  return "degraded";
+}
+
+function manifestReport(manifest, responseChain = []) {
+  if (!manifest) {
+    return { available: false, responseChain };
+  }
+  const selected = [...responseChain].reverse().find(({ httpOk }) => httpOk)
+    || responseChain.at(-1);
+  return {
+    available: true,
+    fileName: selected?.fileName,
+    fingerprint: selected?.fingerprint,
+    host: manifest.host,
+    httpOk: manifest.ok,
+    status: manifest.status,
+    type: manifest.type,
+  };
+}
+
+export async function inspectCardForTargets(page, card, remainingTargets, config, log) {
+  const diagnostics = new ProbeDiagnostics(page, log);
+  diagnostics.start();
+  const startedAt = Date.now();
+  let target;
+  let player = {
+    active: null,
+    changed: false,
+    ready: false,
+    requested: config.playerMode === "shaka" ? "Shaka" : "Site default",
+    selected: false,
+  };
+  let sourceLabel;
+
+  try {
+    await page.goto(card.href, {
+      timeout: config.navigationTimeoutMs,
+      waitUntil: "domcontentloaded",
+    });
+    const sourceLabels = await readSourceLabels(page);
+    target = remainingTargets.find((name) => (
+      sourceLabels.some((label) => sameChannel(label, name))
+    ));
+    if (!target) {
+      return { sourceLabels };
+    }
+
+    log.info(`Found ${target}.`);
+    player = await preparePlayer(page, config, log);
+    sourceLabel = await selectSource(page, target, log);
+    if (sourceLabel) {
+      log.info(`${target} source selected; waiting for playback.`);
+    }
+
+    const playbackStartedAt = Date.now();
+    let playFallbackUsed = false;
+    let fallbackVideoElements = 0;
+    const initialWaitMs = config.playFallbackEnabled
+      ? Math.min(config.playFallbackDelayMs, config.channelTimeoutMs)
+      : config.channelTimeoutMs;
+    let playback = sourceLabel
+      ? await waitForHealthSignal(
+        page,
+        diagnostics,
+        initialWaitMs,
+      )
+      : { initialized: false, snapshots: [] };
+
+    if (
+      sourceLabel
+      && config.playFallbackEnabled
+      && shouldUsePlayFallback(playback.initialized, diagnostics.manifests.getDash())
+    ) {
+      log.warn(
+        `No playback signal followed the ${target} source click; trying the Play control.`,
+      );
+      const fallback = await requestPlaybackFallback(page);
+      playFallbackUsed = fallback.playClicked;
+      fallbackVideoElements = fallback.videoCount;
+    }
+
+    const remainingTimeoutMs = Math.max(
+      0,
+      config.channelTimeoutMs - (Date.now() - playbackStartedAt),
+    );
+    if (
+      sourceLabel
+      && remainingTimeoutMs > 0
+      && (!playback.initialized || !diagnostics.manifests.getDash())
+    ) {
+      playback = await waitForHealthSignal(page, diagnostics, remainingTimeoutMs);
+    }
+    await diagnostics.stop();
+
+    const dash = diagnostics.manifests.getDash();
+    const dashHistory = diagnostics.manifests.getDashHistory();
+    const drm = await collectDrmLifecycle(page);
+    const drmErrors = diagnostics.errors.filter(({ drmRelated }) => drmRelated);
+    const status = determineChannelStatus({
+      dash,
+      playerReady: player.ready,
+      playbackInitialized: playback.initialized,
+      sourceSelected: Boolean(sourceLabel),
+    });
+
+    return {
+      result: {
+        channel: target,
+        manifest: manifestReport(dash, dashHistory),
+        sourceLabels,
+        status,
+        errors: diagnostics.errors,
+        summary: drmErrors.length > 0
+          ? `${drmErrors.length} DRM-related error(s) observed`
+          : dash && !playback.initialized
+            ? "DASH manifest available, but video did not initialize before the timeout"
+            : undefined,
+      },
+    };
+  } catch (error) {
+    diagnostics.record("monitor", error.message, true);
+    await diagnostics.stop();
+    const sourceLabels = await readSourceLabels(page).catch(() => []);
+    const drm = await collectDrmLifecycle(page).catch(() => ({
+      generateRequestCalls: 0,
+      keySystemAccessGranted: 0,
+      keySystemAccessRequests: 0,
+      keySystems: [],
+      licenseUpdateAttempts: 0,
+      licenseUpdatesApplied: 0,
+      mediaKeysAttached: 0,
+      sessionsCreated: 0,
+    }));
+    return {
+      result: {
+        channel: target || remainingTargets.find((targetName) => (
+          sourceLabels.some((label) => sameChannel(label, targetName))
+        )) || null,
+        manifest: manifestReport(
+          diagnostics.manifests.getDash(),
+          diagnostics.manifests.getDashHistory(),
+        ),
+        source: { label: sourceLabel || null, selected: Boolean(sourceLabel) },
+        status: "failed",
+        errors: diagnostics.errors,
+        summary: shortText(error.message),
+      },
+      sourceLabels,
+    };
+  } finally {
+    await diagnostics.stop();
+  }
+}
+
+export function buildReport({
+  cardsScanned,
+  playerMode = "default",
+  results,
+  startedAt,
+  targetChannels,
+  targetUrl,
+}) {
+  const resultNames = new Set(results.map(({ channel }) => channel).filter(Boolean));
+  const missing = targetChannels
+    .filter((channel) => !resultNames.has(channel))
+    .map((channel) => ({
+      channel,
+      manifest: { available: false },    
+      source: { label: null, selected: false },
+      status: "not_found",
+      errors: [], 
+      summary: "No matching source was found in the discovered SKY GO watch pages",
+    }));
+  const channels = [...results, ...missing];
+  const counts = Object.fromEntries(
+    ["healthy", "degraded", "failed", "not_found"].map((status) => [
+      status,
+      channels.filter((channel) => channel.status === status).length,
+    ]),
+  );
+
+  return {
+    channels,
+    generatedAt: new Date().toISOString(),
+    scope: {
+      manifestUrlsIncluded: true,
+      mode: "playback-health-only",
+      targetHost: new URL(targetUrl).host,
+    },
+    summary: {
+      cardsScanned,
+      durationMs: Date.now() - startedAt,
+      ...counts,
+      total: channels.length,
+    },
+  };
+}
