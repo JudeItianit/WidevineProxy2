@@ -5,6 +5,7 @@ import {
   buildReport,
   determineChannelStatus,
   discoveryIsStable,
+  formatChannelResultSummary,
   isBenignRequestFailure,
   isDrmRelatedText,
   isIgnoredRequestNoise,
@@ -156,4 +157,23 @@ test("health reports add missing targets and include the MPD URL used for syncin
     report.channels[0].manifest.fileName,
     "https://media.example/live/manifest.mpd?token=example",
   );
+});
+
+test("the final channel summary separates successful, failed, and unavailable channels", () => {
+  const lines = formatChannelResultSummary({
+    channels: [
+      { channel: "SKY SPORT 9 NZ", manifest: { available: true }, status: "healthy" },
+      { channel: "SKY SPORT 6 NZ", manifest: { available: false }, status: "failed" },
+      { channel: "ESPN NZ", manifest: { available: false }, status: "not_found" },
+      { channel: "SKY SPORT 5 NZ", manifest: { available: true }, status: "degraded" },
+    ],
+  });
+
+  assert.deepEqual(lines, [
+    "Channel result summary:",
+    "Succeeded (1): SKY SPORT 9 NZ",
+    "Failed - worker or target website issue [status=failed] (1): SKY SPORT 6 NZ",
+    "Unavailable - channel does not exist yet [manifest.available=false] (1): ESPN NZ",
+    "Degraded - manifest found but playback was incomplete (1): SKY SPORT 5 NZ",
+  ]);
 });

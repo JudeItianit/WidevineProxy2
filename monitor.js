@@ -7,6 +7,7 @@ import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import {
   buildReport,
   discoverSkyGoCards,
+  formatChannelResultSummary,
   inspectCardForTargets,
 } from "./automation/channel-health.js";
 import { loadConfig } from "./automation/config.js";
@@ -146,6 +147,9 @@ async function main() {
   await fs.mkdir(path.dirname(config.reportPath), { recursive: true });
   await fs.writeFile(config.reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
   log.info(`Health report written to ${config.reportPath}.`);
+  for (const line of formatChannelResultSummary(report)) {
+    log.info(line);
+  }
   await postReport(report, config);
 
   const unhealthy = report.channels.some(({ status }) => status !== "healthy");

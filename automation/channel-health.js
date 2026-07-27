@@ -624,3 +624,29 @@ export function buildReport({
     },
   };
 }
+
+export function formatChannelResultSummary(report) {
+  const channels = report?.channels || [];
+  const succeeded = channels.filter(({ status }) => status === "healthy");
+  const failed = channels.filter(({ status }) => status === "failed");
+  const unavailable = channels.filter(({ manifest, status }) => (
+    status !== "failed" && manifest?.available === false
+  ));
+  const degraded = channels.filter(({ status }) => status === "degraded");
+
+  const line = (label, entries) => {
+    const names = entries.map(({ channel }) => channel).filter(Boolean);
+    return `${label} (${names.length}): ${names.join(", ") || "none"}`;
+  };
+
+  return [
+    "Channel result summary:",
+    line("Succeeded", succeeded),
+    line("Failed - worker or target website issue [status=failed]", failed),
+    line(
+      "Unavailable - channel does not exist yet [manifest.available=false]",
+      unavailable,
+    ),
+    line("Degraded - manifest found but playback was incomplete", degraded),
+  ];
+}
