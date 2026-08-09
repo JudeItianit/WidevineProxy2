@@ -4,12 +4,17 @@ on:
   schedule:
     - cron: "0 */6 * * *"
   workflow_dispatch:
+    inputs:
+      target_channel:
+        description: "Optional single channel name to re-check (overrides TARGET_CHANNELS). Leave empty for the full scheduled sweep."
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: channel-health-monitor
+  group: ${{ github.event.inputs.target_channel != '' && format('channel-health-single-{0}', github.event.inputs.target_channel) || 'channel-health-monitor' }}
   cancel-in-progress: false
 
 jobs:
@@ -25,7 +30,7 @@ jobs:
       HEALTH_REPORT_ENDPOINT: ${{ secrets.HEALTH_REPORT_ENDPOINT }}
       HEALTH_REPORT_TOKEN: ${{ secrets.HEALTH_REPORT_TOKEN }}
       PLAYWRIGHT_STORAGE_STATE_BASE64: ${{ secrets.PLAYWRIGHT_STORAGE_STATE_BASE64 }}
-      TARGET_CHANNELS: ${{ vars.TARGET_CHANNELS }}
+      TARGET_CHANNELS: ${{ github.event.inputs.target_channel != '' && github.event.inputs.target_channel || vars.TARGET_CHANNELS }}
       TARGET_STREAM_URL: https://streamninja.cloud/
 
     steps:
