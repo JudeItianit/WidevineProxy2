@@ -9,7 +9,8 @@
   },
   "scripts": {
     "monitor": "node monitor.js",
-    "check": "node --check monitor.js && node --check automation/config.js && node --check automation/channel-health.js && node --check automation/drm-observer.js && node --check automation/manifest-tracker.js && node automation/channel-health.test.js",
+    "playlist": "node playlist-monitor.js",
+    "check": "node --check monitor.js && node --check playlist-monitor.js && node --check automation/config.js && node --check automation/channel-health.js && node --check automation/channel-playlist.js && node --check automation/playlist-config.js && node --check automation/drm-observer.js && node --check automation/manifest-tracker.js && node automation/channel-health.test.js",
     "test": "node automation/channel-health.test.js"
   },
   "dependencies": {

@@ -1,0 +1,68 @@
+name: Stream playlist (m3u8) capture
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+    inputs:
+      playlist_targets:
+        description: "Optional JSON array of {slug,url} to scan (overrides PLAYLIST_TARGETS). Leave empty for the scheduled sweep."
+        required: false
+        type: string
+      playlist_max_retries:
+        description: "Max page refreshes per channel when a playlist.m3u8 response is not 200 (502/503/timeout)."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: channel-playlist-monitor
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      BROWSER_CHANNEL: chrome
+      HEADLESS: "true"
+      PLAYLIST_MAX_RETRIES: ${{ github.event.inputs.playlist_max_retries != '' && github.event.inputs.playlist_max_retries || vars.PLAYLIST_MAX_RETRIES }}
+      PLAYLIST_TARGETS: ${{ github.event.inputs.playlist_targets != '' && github.event.inputs.playlist_targets || vars.PLAYLIST_TARGETS }}
+      PLAYLIST_CAPTURE_TIMEOUT_MS: ${{ vars.PLAYLIST_CAPTURE_TIMEOUT_MS }}
+      NAVIGATION_TIMEOUT_MS: ${{ vars.NAVIGATION_TIMEOUT_MS }}
+      PLAYWRIGHT_STORAGE_STATE_BASE64: ${{ secrets.PLAYWRIGHT_STORAGE_STATE_BASE64 }}
+      HEALTH_REPORT_ENDPOINT: ${{ secrets.HEALTH_REPORT_ENDPOINT }}
+      HEALTH_REPORT_TOKEN: ${{ secrets.HEALTH_REPORT_TOKEN }}
+      HEALTH_REPORT_PATH: artifacts/channel-playlist.json
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Install Playwright Chromium dependencies
+        run: npx playwright install --with-deps chromium
+
+      - name: Validate JavaScript
+        run: npm run check
+
+      - name: Run playlist (m3u8) capture
+        run: npm run playlist
+
+      - name: Upload playlist report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: channel-playlist-${{ github.run_id }}
+          path: artifacts/channel-playlist.json
+          if-no-files-found: warn
+          retention-days: 14
