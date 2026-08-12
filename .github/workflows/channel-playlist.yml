@@ -34,9 +34,10 @@ jobs:
       NAVIGATION_TIMEOUT_MS: ${{ vars.NAVIGATION_TIMEOUT_MS }}
       PLAYWRIGHT_STORAGE_STATE_BASE64: ${{ secrets.PLAYWRIGHT_STORAGE_STATE_BASE64 }}
       # Dedicated endpoint for the playlist capture report. Uses the same
-      # HEALTH_REPORT_TOKEN as the channel-health monitor (no new secret needed),
-      # but a separate endpoint URL so the two workers stay decoupled.
-      HEALTH_REPORT_ENDPOINT: ${{ vars.PLAYLIST_REPORT_ENDPOINT }}
+      # HEALTH_REPORT_TOKEN as the channel-health monitor, but a separate endpoint
+      # URL (kept as a repository secret for parity with HEALTH_REPORT_ENDPOINT)
+      # so the two workers stay decoupled.
+      HEALTH_REPORT_ENDPOINT: ${{ secrets.PLAYLIST_REPORT_ENDPOINT }}
       HEALTH_REPORT_TOKEN: ${{ secrets.HEALTH_REPORT_TOKEN }}
       HEALTH_REPORT_PATH: artifacts/channel-playlist.json
 
