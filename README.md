@@ -23,9 +23,30 @@ This addon requires a Widevine Device file to work, which is not provided by thi
 
 The repository includes a monitoring-only Playwright command for checking the SKY GO section on StreamNinja. It discovers the watch-page cards, finds the configured channel sources, clicks the matching source to start playback, and records whether a DASH manifest and initialized video element were observed. By default, `PLAYER_MODE=default` leaves the site's current player (normally Bitmovin) untouched. Set `PLAYER_MODE=shaka` only when a Shaka-specific comparison is required. The source click is authoritative and the monitor waits up to 90 seconds by default. The separate Play control is disabled unless `PLAY_FALLBACK_ENABLED=true`; when enabled, it is only used after `PLAY_FALLBACK_DELAY_MS`.
 
-The monitor does not load the extension interception code, use a WVD or remote CDM, or extract keys. It does include the final playable MPD URL in `manifest.fileName` so an authenticated receiver can synchronize that URL to a channel database. Treat reports and workflow artifacts as sensitive because MPD URLs can contain query-string credentials.
+By default the monitor does not load the extension interception code, use a WVD or remote CDM, or extract keys. It does include the final playable MPD URL in `manifest.fileName` so an authenticated receiver can synchronize that URL to a channel database. Treat reports and workflow artifacts as sensitive because MPD URLs can contain query-string credentials.
 
-For DRM diagnostics, the report includes passive lifecycle counters such as the requested key-system name, media-key sessions created, license challenges generated, and successful session updates. It never reads or stores challenge bodies, license bodies, KIDs, or content keys.
+For DRM diagnostics, the report includes passive lifecycle counters such as the requested key-system name, media-key sessions created, license challenges generated, and successful session updates. It never reads or stores challenge bodies, license bodies, KIDs, or content keys — unless key extraction is enabled (see below).
+
+### Optional: local Widevine (WVD) key extraction
+
+When `EXTRACT_KEYS=true`, the monitor performs the same man-in-the-middle that the browser extension does, but with your **local** `.wvd` device instead of the extension service worker. It re-signs the EME license challenge with your device key (via a `page.exposeFunction` bridge to `automation/key-extractor.js`, which ports `lib/cdm.js` + `lib/device.js`), captures the returned license, and decrypts the content keys. Each channel result then carries `keys: [{ kid, k, keyString }]` (key id vs key value, `keyString` is the `--key kid:k` form your backend understands) plus `pssh` and the raw MPD body.
+
+Because the challenge is re-signed for your device, the headless browser's own playback will usually **not** decrypt — that is expected: the goal is key capture, not a healthy-playback signal. Keep `FAIL_ON_UNHEALTHY=false` for extraction runs.
+
+Provide the device as base64 (it is never committed):
+
+```
+base64 -w0 "/path/to/device.wvd"        # copy the output
+```
+
+Set the secret in your environment / GitHub Actions:
+
+```
+EXTRACT_KEYS=true
+WIDEVINE_DEVICE_B64=<base64 from above>
+# CAPTURE_MANIFEST_BODY is implied by EXTRACT_KEYS; set explicitly to also
+# include the raw MPD body when extraction is off.
+```
 
 Manifest reporting prefers the successful response after redirects. It records the host, final HTTP status, full MPD URL in `fileName`, and a non-reversible URL fingerprint.
 

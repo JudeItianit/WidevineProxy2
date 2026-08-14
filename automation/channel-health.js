@@ -27,6 +27,43 @@ export function isBenignRequestFailure(errorText) {
   return String(errorText).trim().toUpperCase() === "NET::ERR_ABORTED";
 }
 
+// Pull base64 PSSH boxes out of a DASH manifest body. Matches both the
+// namespaced <cenc:pssh> and the bare <pssh> variants; returns them as an array
+// of base64 strings (one per ContentProtection entry).
+export function extractPsshFromMpd(body) {
+  if (!body) {
+    return [];
+  }
+  const matches = body.match(/<(?:cenc:)?pssh>([^<]+)<\/(?:cenc:)?pssh>/gi) || [];
+  const pssh = [];
+  for (const tag of matches) {
+    const inner = tag.replace(/<[^>]+>/g, "").trim();
+    if (inner) {
+      pssh.push(inner);
+    }
+  }
+  return pssh;
+}
+
+// Read whatever the in-page key-extraction hook accumulated on the page.
+async function collectExtractedKeys(page) {
+  const aggregate = { errors: [], keys: [] };
+  for (const frame of page.frames()) {
+    const data = await frame.evaluate(() => {
+      const current = globalThis.__channelHealthKeys;
+      return current
+        ? { errors: [...current.errors], keys: [...current.keys] }
+        : null;
+    }).catch(() => null);
+    if (!data) {
+      continue;
+    }
+    aggregate.errors.push(...data.errors);
+    aggregate.keys.push(...data.keys);
+  }
+  return aggregate;
+}
+
 export function normalizeName(value) {
   return String(value)
     .normalize("NFKC")
@@ -171,11 +208,13 @@ export async function discoverSkyGoCards(page, config, log) {
 }
 
 class ProbeDiagnostics {
-  constructor(page, log) {
+  constructor(page, config, log) {
     this.page = page;
     this.log = log;
+    this.config = config;
     this.errors = [];
     this.manifests = new ManifestTracker({
+      captureBody: Boolean(config?.captureManifestBody),
       onCapture: ({ host, status, type }) => {
         log.info(`Observed ${type} manifest from ${host} (HTTP ${status}).`);
       },
@@ -448,7 +487,7 @@ function manifestReport(manifest, responseChain = []) {
 }
 
 export async function inspectCardForTargets(page, card, remainingTargets, config, log) {
-  const diagnostics = new ProbeDiagnostics(page, log);
+  const diagnostics = new ProbeDiagnostics(page, config, log);
   diagnostics.start();
   const startedAt = Date.now();
   let target;
@@ -523,6 +562,9 @@ export async function inspectCardForTargets(page, card, remainingTargets, config
 
     const dash = diagnostics.manifests.getDash();
     const dashHistory = diagnostics.manifests.getDashHistory();
+    const mpdBody = dash?.body ?? null;
+    const pssh = extractPsshFromMpd(mpdBody);
+    const extracted = config.extractKeys ? await collectExtractedKeys(page) : null;
     const drm = await collectDrmLifecycle(page);
     const drmErrors = diagnostics.errors.filter(({ drmRelated }) => drmRelated);
     const status = determineChannelStatus({
@@ -532,24 +574,34 @@ export async function inspectCardForTargets(page, card, remainingTargets, config
       sourceSelected: Boolean(sourceLabel),
     });
 
+    const extractedKeyCount = extracted?.keys?.length ?? 0;
+    const summary = drmErrors.length > 0
+      ? `${drmErrors.length} DRM-related error(s) observed`
+      : dash && !playback.initialized
+        ? "DASH manifest available, but video did not initialize before the timeout"
+        : extractedKeyCount > 0
+          ? `Extracted ${extractedKeyCount} key(s) via local WVD device`
+          : undefined;
+
     return {
       result: {
         channel: target,
-        manifest: manifestReport(dash, dashHistory),
+        manifest: { ...manifestReport(dash, dashHistory), body: mpdBody },
+        keys: extracted?.keys ?? [],
+        pssh,
         sourceLabels,
         status,
         errors: diagnostics.errors,
-        summary: drmErrors.length > 0
-          ? `${drmErrors.length} DRM-related error(s) observed`
-          : dash && !playback.initialized
-            ? "DASH manifest available, but video did not initialize before the timeout"
-            : undefined,
+        summary,
       },
     };
   } catch (error) {
     diagnostics.record("monitor", error.message, true);
     await diagnostics.stop();
     const sourceLabels = await readSourceLabels(page).catch(() => []);
+    const mpdBody = diagnostics.manifests.getDash()?.body ?? null;
+    const pssh = extractPsshFromMpd(mpdBody);
+    const extracted = config.extractKeys ? await collectExtractedKeys(page).catch(() => null) : null;
     const drm = await collectDrmLifecycle(page).catch(() => ({
       generateRequestCalls: 0,
       keySystemAccessGranted: 0,
@@ -565,10 +617,15 @@ export async function inspectCardForTargets(page, card, remainingTargets, config
         channel: target || remainingTargets.find((targetName) => (
           sourceLabels.some((label) => sameChannel(label, targetName))
         )) || null,
-        manifest: manifestReport(
-          diagnostics.manifests.getDash(),
-          diagnostics.manifests.getDashHistory(),
-        ),
+        manifest: {
+          ...manifestReport(
+            diagnostics.manifests.getDash(),
+            diagnostics.manifests.getDashHistory(),
+          ),
+          body: mpdBody,
+        },
+        keys: extracted?.keys ?? [],
+        pssh,
         source: { label: sourceLabel || null, selected: Boolean(sourceLabel) },
         status: "failed",
         errors: diagnostics.errors,

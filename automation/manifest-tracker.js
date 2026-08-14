@@ -63,7 +63,8 @@ function manifestPublicFields(manifest) {
 }
 
 export class ManifestTracker {
-  constructor({ maxBodyBytes = 2_000_000, onCapture } = {}) {
+  constructor({ captureBody = false, maxBodyBytes = 2_000_000, onCapture } = {}) {
+    this.captureBody = captureBody;
     this.maxBodyBytes = maxBodyBytes;
     this.onCapture = onCapture;
     this.manifests = new Map();
@@ -80,7 +81,7 @@ export class ManifestTracker {
     const url = response.url();
     const urlType = typeFromUrl(url);
     if (urlType) {
-      this.record(urlType, response);
+      await this.record(urlType, response);
       return;
     }
 
@@ -88,7 +89,7 @@ export class ManifestTracker {
     const contentType = headers["content-type"] || "";
     const headerType = typeFromContentType(contentType);
     if (headerType) {
-      this.record(headerType, response);
+      await this.record(headerType, response);
       return;
     }
 
@@ -111,11 +112,11 @@ export class ManifestTracker {
     }
     const detected = detectManifestType(text);
     if (detected) {
-      this.record(detected, response);
+      await this.record(detected, response, text);
     }
   }
 
-  record(type, response) {
+  async record(type, response, bodyText) {
     const url = response.url();
     const key = `${type}:${url}`;
     if (this.manifests.has(key)) {
@@ -129,6 +130,16 @@ export class ManifestTracker {
       type,
       url,
     };
+    if (this.captureBody) {
+      try {
+        const body = bodyText ?? (await withTimeout(response.text(), 5_000));
+        if (body && Buffer.byteLength(body, "utf8") <= this.maxBodyBytes) {
+          manifest.body = body;
+        }
+      } catch {
+        // Body capture is best-effort; ignore failures.
+      }
+    }
     this.manifests.set(key, manifest);
     this.onCapture?.(manifest);
   }

@@ -12,6 +12,8 @@ import {
 } from "./automation/channel-health.js";
 import { loadConfig } from "./automation/config.js";
 import { installDrmObserver } from "./automation/drm-observer.js";
+import { createKeyExtractor } from "./automation/key-extractor.js";
+import { installKeyExtractionHook } from "./automation/key-extraction-hook.js";
 
 chromium.use(StealthPlugin());
 
@@ -101,6 +103,21 @@ async function main() {
     });
     await context.addInitScript(installDrmObserver);
     const page = await context.newPage();
+
+    if (config.extractKeys) {
+      if (!config.widevineDeviceB64) {
+        throw new Error(
+          "EXTRACT_KEYS is enabled but WIDEVINE_DEVICE_B64 is not set. "
+          + "Add the base64 of your .wvd file as a secret.",
+        );
+      }
+      const extractor = createKeyExtractor({ deviceB64: config.widevineDeviceB64 });
+      log.info(`Key extraction enabled using local WVD device: ${extractor.deviceName}`);
+      await context.addInitScript(installKeyExtractionHook);
+      await page.exposeFunction("__wvdCreateChallenge", extractor.createChallenge);
+      await page.exposeFunction("__wvdParseLicense", extractor.parseLicense);
+    }
+
     const cards = await discoverSkyGoCards(page, config, log);
 
     for (const card of cards) {

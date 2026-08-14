@@ -196,6 +196,17 @@ export function loadConfig() {
     reportToken: process.env.HEALTH_REPORT_TOKEN?.trim() || undefined,
     sourceSettleMs: nonNegativeInteger("SOURCE_SETTLE_MS", 1_000),
     storageState: loadStorageState(),
+    // Key extraction (opt-in). When enabled the monitor MITMs the EME exchange
+    // with your local .wvd device to recover content keys. This is the same
+    // mechanism the browser extension uses; it intentionally re-signs the
+    // challenge, so video playback in the headless browser will usually not
+    // decrypt -- the goal is key capture, not playback. WIDEVINE_DEVICE_B64 is
+    // the base64 of your .wvd file (kept in a secret, never committed).
+    extractKeys: booleanValue("EXTRACT_KEYS", false),
+    widevineDeviceB64: process.env.WIDEVINE_DEVICE_B64?.trim() || undefined,
+    // Capture the raw manifest body alongside the URL/status. Needed to surface
+    // the MPD + PSSH in the report; also implied by extractKeys.
+    captureManifestBody: booleanValue("CAPTURE_MANIFEST_BODY", false) || booleanValue("EXTRACT_KEYS", false),
     targetChannels: csvValues("TARGET_CHANNELS", [
       "ESPN NZ",
       "ESPN 2 NZ",
