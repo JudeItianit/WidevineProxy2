@@ -47,12 +47,23 @@ export function extractPsshFromMpd(body) {
 
 // Read whatever the in-page key-extraction hook accumulated on the page.
 async function collectExtractedKeys(page) {
-  const aggregate = { errors: [], keys: [] };
+  const aggregate = { errors: [], keys: [], pssh: [], challengeCalls: 0, licenseCalls: 0, createSkippedNoFn: 0, clearKeyChallengeCalls: 0, clearKeyLicenseCalls: 0, hookActive: false, diag: {} };
   for (const frame of page.frames()) {
     const data = await frame.evaluate(() => {
       const current = globalThis.__channelHealthKeys;
       return current
-        ? { errors: [...current.errors], keys: [...current.keys] }
+        ? {
+            errors: [...current.errors],
+            keys: [...current.keys],
+            pssh: [...current.pssh],
+            challengeCalls: current.challengeCalls || 0,
+            licenseCalls: current.licenseCalls || 0,
+            createSkippedNoFn: current.createSkippedNoFn || 0,
+            clearKeyChallengeCalls: current.clearKeyChallengeCalls || 0,
+            clearKeyLicenseCalls: current.clearKeyLicenseCalls || 0,
+            hookActive: Boolean(current.hookActive),
+            diag: current.diag || {},
+          }
         : null;
     }).catch(() => null);
     if (!data) {
@@ -60,6 +71,23 @@ async function collectExtractedKeys(page) {
     }
     aggregate.errors.push(...data.errors);
     aggregate.keys.push(...data.keys);
+    aggregate.pssh.push(...data.pssh);
+    aggregate.challengeCalls += data.challengeCalls;
+    aggregate.licenseCalls += data.licenseCalls;
+    aggregate.createSkippedNoFn += data.createSkippedNoFn;
+    aggregate.clearKeyChallengeCalls += data.clearKeyChallengeCalls;
+    aggregate.clearKeyLicenseCalls += data.clearKeyLicenseCalls;
+    aggregate.hookActive = aggregate.hookActive || data.hookActive;
+    if (data.diag) {
+      // Null-skipping merge: an un-exercised frame returns diag fields as null
+      // (it never saw a challenge/license). A plain Object.assign would clobber
+      // the real values collected from the exercising frame with those nulls.
+      for (const [key, value] of Object.entries(data.diag)) {
+        if (value != null) {
+          aggregate.diag[key] = value;
+        }
+      }
+    }
   }
   return aggregate;
 }
@@ -214,7 +242,10 @@ class ProbeDiagnostics {
     this.config = config;
     this.errors = [];
     this.manifests = new ManifestTracker({
-      captureBody: Boolean(config?.captureManifestBody),
+      // The report no longer includes the manifest body; the decryptor (backend)
+      // fetches the MPD itself. captureBody stays available (default false) for
+      // any future need without wiring it into the report.
+      captureBody: false,
       onCapture: ({ host, status, type }) => {
         log.info(`Observed ${type} manifest from ${host} (HTTP ${status}).`);
       },
@@ -563,7 +594,6 @@ export async function inspectCardForTargets(page, card, remainingTargets, config
     const dash = diagnostics.manifests.getDash();
     const dashHistory = diagnostics.manifests.getDashHistory();
     const mpdBody = dash?.body ?? null;
-    const pssh = extractPsshFromMpd(mpdBody);
     const extracted = config.extractKeys ? await collectExtractedKeys(page) : null;
     const drm = await collectDrmLifecycle(page);
     const drmErrors = diagnostics.errors.filter(({ drmRelated }) => drmRelated);
@@ -586,9 +616,8 @@ export async function inspectCardForTargets(page, card, remainingTargets, config
     return {
       result: {
         channel: target,
-        manifest: { ...manifestReport(dash, dashHistory), body: mpdBody },
+        manifest: manifestReport(dash, dashHistory),
         keys: extracted?.keys ?? [],
-        pssh,
         sourceLabels,
         status,
         errors: diagnostics.errors,
@@ -600,7 +629,6 @@ export async function inspectCardForTargets(page, card, remainingTargets, config
     await diagnostics.stop();
     const sourceLabels = await readSourceLabels(page).catch(() => []);
     const mpdBody = diagnostics.manifests.getDash()?.body ?? null;
-    const pssh = extractPsshFromMpd(mpdBody);
     const extracted = config.extractKeys ? await collectExtractedKeys(page).catch(() => null) : null;
     const drm = await collectDrmLifecycle(page).catch(() => ({
       generateRequestCalls: 0,
@@ -617,15 +645,11 @@ export async function inspectCardForTargets(page, card, remainingTargets, config
         channel: target || remainingTargets.find((targetName) => (
           sourceLabels.some((label) => sameChannel(label, targetName))
         )) || null,
-        manifest: {
-          ...manifestReport(
-            diagnostics.manifests.getDash(),
-            diagnostics.manifests.getDashHistory(),
-          ),
-          body: mpdBody,
-        },
+        manifest: manifestReport(
+          diagnostics.manifests.getDash(),
+          diagnostics.manifests.getDashHistory(),
+        ),
         keys: extracted?.keys ?? [],
-        pssh,
         source: { label: sourceLabel || null, selected: Boolean(sourceLabel) },
         status: "failed",
         errors: diagnostics.errors,

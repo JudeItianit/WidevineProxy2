@@ -181,7 +181,9 @@ export function loadConfig() {
     discoveryStablePasses: positiveInteger("DISCOVERY_STABLE_PASSES", 3),
     extraHTTPHeaders: loadExtraHeaders(),
     failOnUnhealthy: booleanValue("FAIL_ON_UNHEALTHY", false),
-    headless: booleanValue("HEADLESS", true),
+    // HEADLESS toggle: "false" => headed; "true" (default) => old headless (no Widevine
+    // CDM); "new" => new headless (exposes the Widevine CDM for Widevine-only services).
+    headlessMode: process.env.HEADLESS?.trim().toLowerCase() || "true",
     ignoreHTTPSErrors: booleanValue("IGNORE_HTTPS_ERRORS", false),
     navigationTimeoutMs: positiveInteger("NAVIGATION_TIMEOUT_MS", 60_000),
     maxCards: positiveInteger("MAX_CARDS", 200),
@@ -200,13 +202,12 @@ export function loadConfig() {
     // with your local .wvd device to recover content keys. This is the same
     // mechanism the browser extension uses; it intentionally re-signs the
     // challenge, so video playback in the headless browser will usually not
-    // decrypt -- the goal is key capture, not playback. WIDEVINE_DEVICE_B64 is
-    // the base64 of your .wvd file (kept in a secret, never committed).
+    // decrypt. The goal is key capture, not playback. PSSH is recovered from the
+    // license-challenge init data, so the manifest body is never captured or
+    // reported. WIDEVINE_DEVICE_B64 is the base64 of your .wvd file (kept in a
+    // secret, never committed).
     extractKeys: booleanValue("EXTRACT_KEYS", false),
     widevineDeviceB64: process.env.WIDEVINE_DEVICE_B64?.trim() || undefined,
-    // Capture the raw manifest body alongside the URL/status. Needed to surface
-    // the MPD + PSSH in the report; also implied by extractKeys.
-    captureManifestBody: booleanValue("CAPTURE_MANIFEST_BODY", false) || booleanValue("EXTRACT_KEYS", false),
     targetChannels: csvValues("TARGET_CHANNELS", [
       "ESPN NZ",
       "ESPN 2 NZ",

@@ -29,7 +29,7 @@ For DRM diagnostics, the report includes passive lifecycle counters such as the 
 
 ### Optional: local Widevine (WVD) key extraction
 
-When `EXTRACT_KEYS=true`, the monitor performs the same man-in-the-middle that the browser extension does, but with your **local** `.wvd` device instead of the extension service worker. It re-signs the EME license challenge with your device key (via a `page.exposeFunction` bridge to `automation/key-extractor.js`, which ports `lib/cdm.js` + `lib/device.js`), captures the returned license, and decrypts the content keys. Each channel result then carries `keys: [{ kid, k, keyString }]` (key id vs key value, `keyString` is the `--key kid:k` form your backend understands) plus `pssh` and the raw MPD body.
+When `EXTRACT_KEYS=true`, the monitor performs the same man-in-the-middle that the browser extension does, but with your **local** `.wvd` device instead of the extension service worker. It re-signs the EME license challenge with your device key (via a `page.exposeFunction` bridge to `automation/key-extractor.js`, which ports `lib/cdm.js` + `lib/device.js`), captures the returned license, and decrypts the content keys. Each channel result then carries `keys: [{ kid, k, keyString }]` (key id vs key value, `keyString` is the `--key kid:k` form your backend understands) plus `pssh`. PSSH is taken from the license-challenge init data, so the report never includes the manifest body.
 
 Because the challenge is re-signed for your device, the headless browser's own playback will usually **not** decrypt — that is expected: the goal is key capture, not a healthy-playback signal. Keep `FAIL_ON_UNHEALTHY=false` for extraction runs.
 
@@ -44,8 +44,8 @@ Set the secret in your environment / GitHub Actions:
 ```
 EXTRACT_KEYS=true
 WIDEVINE_DEVICE_B64=<base64 from above>
-# CAPTURE_MANIFEST_BODY is implied by EXTRACT_KEYS; set explicitly to also
-# include the raw MPD body when extraction is off.
+# PSSH is recovered from the license-challenge init data, so the manifest body is
+# never captured or reported. No separate flag is needed.
 ```
 
 Manifest reporting prefers the successful response after redirects. It records the host, final HTTP status, full MPD URL in `fileName`, and a non-reversible URL fingerprint.

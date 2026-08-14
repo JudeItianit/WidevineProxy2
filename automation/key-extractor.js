@@ -78,6 +78,22 @@ function b64Encode(bytes) {
   return Buffer.from(bytes).toString("base64");
 }
 
+// Accept the EME payload in whatever form the caller hands it. The browser now
+// ships raw bytes as a JSON number array (via page.exposeFunction), but we still
+// tolerate a base64 string for resilience/testing.
+function toBytes(input) {
+  if (input instanceof Uint8Array) {
+    return input;
+  }
+  if (Array.isArray(input)) {
+    return Uint8Array.from(input);
+  }
+  if (typeof input === "string") {
+    return b64Decode(input);
+  }
+  throw new Error("unsupported challenge/license input");
+}
+
 // The `Session` round trip produces a challenge and later needs the same
 // `Session` instance to decrypt the matching license. We key it by the
 // base64 request id, mirroring background.js.
@@ -97,8 +113,8 @@ function createKeyExtractor({ deviceB64 }) {
 
   const sessionsByRequestId = new Map();
 
-  function createChallenge(challengeB64) {
-    const signedMessage = SignedMessage.decode(b64Decode(challengeB64));
+  function createChallenge(input) {
+    const signedMessage = SignedMessage.decode(toBytes(input));
     const licenseRequest = LicenseRequest.decode(signedMessage.msg);
     const psshData = licenseRequest.contentId.widevinePsshData.psshData[0];
     if (!psshData) {
@@ -118,11 +134,15 @@ function createKeyExtractor({ deviceB64 }) {
       deviceInfo.type === 2,
     );
     sessionsByRequestId.set(b64Encode(requestId), session);
-    return b64Encode(challenge);
+    // Return raw bytes (as number arrays) for BOTH the re-signed challenge and
+    // the PSSH so the browser can rebuild them without any base64 round-trip
+    // across the exposeFunction boundary. Base64 strings were getting truncated
+    // in transit, which surfaced as protobuf "index out of range" errors.
+    return { challenge: Array.from(challenge), pssh: Array.from(psshData) };
   }
 
-  function parseLicense(licenseB64) {
-    const license = b64Decode(licenseB64);
+  function parseLicense(input) {
+    const license = toBytes(input);
     const signedLicenseMessage = SignedMessage.decode(license);
     if (signedLicenseMessage.type !== SignedMessage.MessageType.LICENSE) {
       // ClearKey or a non-license message; nothing for us to decrypt.
@@ -143,8 +163,6 @@ function createKeyExtractor({ deviceB64 }) {
     return keys.map(({ kid, k }) => ({
       kid: kid.toLowerCase(),
       k: k.toLowerCase(),
-      // Format the backend understands: `--key <kid>:<k>`.
-      keyString: `${kid.toLowerCase()}:${k.toLowerCase()}`,
     }));
   }
 

@@ -7,8 +7,6 @@ blob-report/
 artifacts/
 
 # Local credentials and authenticated browser state
-*.wvd
-remote.json
 storage-state*.json
 auth.json
 .env

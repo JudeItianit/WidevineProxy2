@@ -1,0 +1,8 @@
+{
+    "device_name": "public",
+    "device_type": "ANDROID",
+    "host": "https://cdrm-project.com/remotecdm/widevine",
+    "secret": "CDRM",
+    "security_level": 3,
+    "system_id": 22590
+}

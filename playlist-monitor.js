@@ -28,10 +28,17 @@ function publicErrorMessage(error) {
 }
 
 async function launchBrowser(config) {
+  const mode = config.headlessMode || "true";
+  const headless = mode !== "false";
   const options = {
     args: ["--autoplay-policy=no-user-gesture-required"],
-    headless: config.headless,
+    headless,
   };
+  // New headless exposes the Widevine CDM (old headless does not), which is required
+  // for services that serve Widevine instead of a ClearKey fallback.
+  if (mode === "new") {
+    options.args.push("--headless=new");
+  }
 
   if (!config.browserChannel) {
     return chromium.launch(options);

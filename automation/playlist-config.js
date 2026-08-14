@@ -131,7 +131,9 @@ export function loadConfig() {
     browserFallback: booleanValue("BROWSER_FALLBACK", true),
     extraHTTPHeaders: loadExtraHeaders(),
     failOnUnhealthy: booleanValue("FAIL_ON_UNHEALTHY", false),
-    headless: booleanValue("HEADLESS", true),
+    // HEADLESS toggle: "false" => headed; "true" (default) => old headless (no Widevine
+    // CDM); "new" => new headless (exposes the Widevine CDM for Widevine-only services).
+    headlessMode: process.env.HEADLESS?.trim().toLowerCase() || "true",
     ignoreHTTPSErrors: booleanValue("IGNORE_HTTPS_ERRORS", false),
     navigationTimeoutMs: positiveInteger("NAVIGATION_TIMEOUT_MS", 60_000),
     playlistCaptureTimeoutMs: positiveInteger("PLAYLIST_CAPTURE_TIMEOUT_MS", 30_000),
