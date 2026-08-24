@@ -64,7 +64,7 @@ npm install
 npx playwright install chromium
 ```
 
-The monitor automatically loads `.env` from the repository root when it exists. `.env.example` is only a committed template and is never read as configuration. Shell and GitHub Actions environment variables take precedence over values in `.env`. `TARGET_STREAM_URL` defaults to `https://streamninja.cloud/`, and `TARGET_CHANNELS` defaults to ESPN NZ, ESPN 2 NZ, Sky Sport 1-9 NZ, and Sky Sport Select NZ.
+The monitor automatically loads `.env` from the repository root when it exists. `.env.example` is only a committed template and is never read as configuration. Shell and GitHub Actions environment variables take precedence over values in `.env`. `TARGET_STREAM_URL` defaults to `https://streamcorner.st/skygo`, and `TARGET_CHANNELS` defaults to ESPN NZ, ESPN 2 NZ, Sky Sport 1-9 NZ, and Sky Sport Select NZ.
 
 Set `HEADLESS=false` in `.env` to display the automated browser locally.
 

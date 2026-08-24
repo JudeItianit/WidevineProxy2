@@ -168,15 +168,20 @@ export async function discoverSkyGoCards(page, config, log) {
     await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => {});
 
     const toggle = page.getByRole("button", { name: /toggle sky go/i }).first();
-    await toggle.waitFor({ state: "visible", timeout: config.navigationTimeoutMs });
-    await toggle.scrollIntoViewIfNeeded();
-    if ((await toggle.getAttribute("aria-expanded")) === "false") {
-      await resilientClick(toggle, 3_000);
+    const hasToggle = (await toggle.count().catch(() => 0)) > 0;
+    if (hasToggle) {
+      await toggle.waitFor({ state: "visible", timeout: config.navigationTimeoutMs });
+      await toggle.scrollIntoViewIfNeeded();
+      if ((await toggle.getAttribute("aria-expanded")) === "false") {
+        await resilientClick(toggle, 3_000);
+      }
     }
 
-    const section = page.locator("section").filter({
-      has: page.getByRole("button", { name: /toggle sky go/i }),
-    }).first();
+    const section = hasToggle
+      ? page.locator("section").filter({
+          has: page.getByRole("button", { name: /toggle sky go/i }),
+        }).first()
+      : page.locator("body");
     let stablePasses = 0;
     let previousCount = -1;
 
@@ -189,6 +194,7 @@ export async function discoverSkyGoCards(page, config, log) {
         links.map((link) => ({
           href: link.href,
           label: [
+            link.querySelector("h3")?.textContent,
             link.querySelector("img")?.alt,
             ...[...link.querySelectorAll("p")].map((node) => node.textContent),
           ].filter(Boolean).join(" | "),

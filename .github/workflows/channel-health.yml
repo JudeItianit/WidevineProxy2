@@ -31,7 +31,7 @@ jobs:
       HEALTH_REPORT_TOKEN: ${{ secrets.HEALTH_REPORT_TOKEN }}
       PLAYWRIGHT_STORAGE_STATE_BASE64: ${{ secrets.PLAYWRIGHT_STORAGE_STATE_BASE64 }}
       TARGET_CHANNELS: ${{ github.event.inputs.target_channel != '' && github.event.inputs.target_channel || vars.TARGET_CHANNELS }}
-      TARGET_STREAM_URL: https://streamninja.cloud/
+      TARGET_STREAM_URL: ${{ vars.TARGET_STREAM_URL }}
 
     steps:
       - name: Check out repository

@@ -162,7 +162,7 @@ export function loadConfig() {
   const allowInsecureReport = booleanValue("ALLOW_INSECURE_REPORT_ENDPOINT", false);
   const targetUrl = webUrl(
     "TARGET_STREAM_URL",
-    process.env.TARGET_STREAM_URL?.trim() || "https://streamninja.cloud/",
+    process.env.TARGET_STREAM_URL?.trim() || "https://streamcorner.st/skygo",
     allowInsecureTarget,
   );
 

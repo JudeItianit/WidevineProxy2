@@ -147,7 +147,7 @@ test("health reports add missing targets and include the MPD URL used for syncin
     }],
     startedAt: Date.now(),
     targetChannels: ["ESPN NZ", "ESPN 2 NZ"],
-    targetUrl: "https://streamninja.cloud/",
+    targetUrl: "https://streamcorner.st/skygo",
   });
 
   assert.equal(report.summary.healthy, 1);

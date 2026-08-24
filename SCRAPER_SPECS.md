@@ -62,7 +62,7 @@ Create a GitHub Actions workflow that:
 - Passes secrets to environment variables:
   - `SERVER_ENDPOINT`: `${{ secrets.SERVER_ENDPOINT }}`
   - `API_AUTH_TOKEN`: `${{ secrets.API_AUTH_TOKEN }}`
-  - `TARGET_STREAM_URL`: `${{ secrets.TARGET_STREAM_URL }}`
+  - `TARGET_STREAM_URL`: `${{ vars.TARGET_STREAM_URL }}`
   - `WVD_BASE64`: `${{ secrets.WVD_BASE64 }}`
 - Executes `node extractor.js`.
 
