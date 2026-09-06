@@ -25,7 +25,7 @@ jobs:
       BROWSER_CHANNEL: chrome
       CHANNEL_TIMEOUT_MS: "90000"
       FAIL_ON_UNHEALTHY: "false"
-      HEADLESS: "true"
+      HEADLESS: ${{ vars.HEADLESS_MODE || 'new' }}
       PLAYER_MODE: ${{ vars.PLAYER_MODE }}
       HEALTH_REPORT_ENDPOINT: ${{ secrets.HEALTH_REPORT_ENDPOINT }}
       HEALTH_REPORT_TOKEN: ${{ secrets.HEALTH_REPORT_TOKEN }}
@@ -46,7 +46,7 @@ jobs:
         run: npm install --no-audit --no-fund
 
       - name: Install Playwright Chromium dependencies
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chrome
 
       - name: Validate JavaScript
         run: npm run check

@@ -45,6 +45,10 @@ async function launchBrowser(config) {
   // New headless exposes the Widevine CDM (old headless does not), which is required
   // for services that serve Widevine instead of a ClearKey fallback.
   if (mode === "new") {
+    // Drive headless mode ourselves via the flag and tell Playwright NOT to also
+    // inject the legacy "--headless" (which would conflict and silently revert to
+    // old headless without the Widevine CDM).
+    options.headless = false;
     options.args.push("--headless=new");
   }
 

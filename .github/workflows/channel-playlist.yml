@@ -27,7 +27,7 @@ jobs:
     timeout-minutes: 60
     env:
       BROWSER_CHANNEL: chrome
-      HEADLESS: "true"
+      HEADLESS: ${{ vars.HEADLESS_MODE || 'new' }}
       PLAYLIST_MAX_RETRIES: ${{ github.event.inputs.playlist_max_retries != '' && github.event.inputs.playlist_max_retries || vars.PLAYLIST_MAX_RETRIES }}
       PLAYLIST_TARGETS: ${{ github.event.inputs.playlist_targets != '' && github.event.inputs.playlist_targets || vars.PLAYLIST_TARGETS }}
       PLAYLIST_CAPTURE_TIMEOUT_MS: ${{ vars.PLAYLIST_CAPTURE_TIMEOUT_MS }}
@@ -54,7 +54,7 @@ jobs:
         run: npm install --no-audit --no-fund
 
       - name: Install Playwright Chromium dependencies
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chrome
 
       - name: Validate JavaScript
         run: npm run check
