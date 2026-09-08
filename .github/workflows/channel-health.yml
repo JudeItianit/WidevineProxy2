@@ -30,6 +30,14 @@ jobs:
       HEALTH_REPORT_ENDPOINT: ${{ secrets.HEALTH_REPORT_ENDPOINT }}
       HEALTH_REPORT_TOKEN: ${{ secrets.HEALTH_REPORT_TOKEN }}
       PLAYWRIGHT_STORAGE_STATE_BASE64: ${{ secrets.PLAYWRIGHT_STORAGE_STATE_BASE64 }}
+      # The site's stream resolution (obfuscated POST chain, vesper.heytheredelilah.xyz)
+      # BLOCKS DATACENTER egress — GitHub runner IPs get net::ERR_FAILED. Set these to a
+      # residential/VPN proxy (e.g. socks5://host:1080) to unblock it. Credentials are
+      # secrets; leave the server unset to run without a proxy.
+      PLAYWRIGHT_PROXY_SERVER: ${{ secrets.PLAYWRIGHT_PROXY_SERVER }}
+      PLAYWRIGHT_PROXY_USERNAME: ${{ secrets.PLAYWRIGHT_PROXY_USERNAME }}
+      PLAYWRIGHT_PROXY_PASSWORD: ${{ secrets.PLAYWRIGHT_PROXY_PASSWORD }}
+      PLAYWRIGHT_PROXY_BYPASS: ${{ vars.PLAYWRIGHT_PROXY_BYPASS }}
       TARGET_CHANNELS: ${{ github.event.inputs.target_channel != '' && github.event.inputs.target_channel || vars.TARGET_CHANNELS }}
       TARGET_STREAM_URL: ${{ vars.TARGET_STREAM_URL }}
 

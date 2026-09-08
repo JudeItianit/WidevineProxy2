@@ -141,6 +141,26 @@ function loadStorageState() {
   return undefined;
 }
 
+// The target site resolves its streams through an obfuscated POST chain that BLOCKS
+// DATACENTER egress: both Cloudflare Browser Run and GitHub Actions get
+// `net::ERR_FAILED` on vesper.heytheredelilah.xyz, while a residential/VPN IP is accepted.
+// Playwright supports a launch-time proxy, so set PLAYWRIGHT_PROXY_SERVER (plus optional
+// PLAYWRIGHT_PROXY_USERNAME / _PASSWORD / _BYPASS) to route the browser through trusted
+// egress. NOTE: this only helps the local/GitHub runner. Cloudflare Browser Run cannot be
+// proxied — its launch options expose no proxy field — so the worker cannot use this.
+function loadProxy() {
+  const server = process.env.PLAYWRIGHT_PROXY_SERVER?.trim();
+  if (!server) {
+    return undefined;
+  }
+  return {
+    server,
+    username: process.env.PLAYWRIGHT_PROXY_USERNAME?.trim() || undefined,
+    password: process.env.PLAYWRIGHT_PROXY_PASSWORD?.trim() || undefined,
+    bypass: process.env.PLAYWRIGHT_PROXY_BYPASS?.trim() || undefined,
+  };
+}
+
 function loadExtraHeaders() {
   const raw = process.env.EXTRA_HTTP_HEADERS_JSON?.trim();
   if (!raw) {
@@ -191,6 +211,7 @@ export function loadConfig() {
     playFallbackDelayMs: positiveInteger("PLAY_FALLBACK_DELAY_MS", 30_000),
     playFallbackEnabled: booleanValue("PLAY_FALLBACK_ENABLED", false),
     postTimeoutMs: positiveInteger("POST_TIMEOUT_MS", 30_000),
+    proxy: loadProxy(),
     reportEndpoint: optionalWebUrl("HEALTH_REPORT_ENDPOINT", allowInsecureReport),
     reportPath: path.resolve(
       process.env.HEALTH_REPORT_PATH?.trim() || "artifacts/channel-health.json",

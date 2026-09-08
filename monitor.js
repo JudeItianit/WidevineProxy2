@@ -52,6 +52,13 @@ async function launchBrowser(config) {
     options.args.push("--headless=new");
   }
 
+  // Route through trusted (residential/VPN) egress when configured. The site's stream
+  // resolution is blocked from datacenter IPs, so this is what unblocks CI.
+  if (config.proxy) {
+    options.proxy = config.proxy;
+    log.info(`Routing the browser through proxy: ${config.proxy.server}`);
+  }
+
   if (!config.browserChannel) {
     return chromium.launch(options);
   }

@@ -2,18 +2,26 @@
 // Unlike channel-health (which waits for DASH playback), this worker only needs
 // the first playlist.m3u8 response to come back with HTTP 200.
 
-// Matches a playlist.m3u8 (HLS) response while explicitly excluding DASH manifests.
-const M3U8_PATTERN = /\/playlist\.m3u8(\?|$)/i;
+// Strict mode (default): matches the well-known /playlist.m3u8 (HLS) response
+// while explicitly excluding DASH manifests.
+const PLAYLIST_M3U8_PATTERN = /\/playlist\.m3u8(\?|$)/i;
 
-export function isPlaylistM3u8(url) {
+// Loose mode (iframe embeds, PLAYLIST_MATCH_MODE=any): matches ANY url ending in
+// .m3u8 (HLS master or variant playlist) while excluding DASH manifests. Used by
+// the 2-hour iframe capture where the stream url looks like
+// https://<host>/main/secure/<hash>/<ts>/<slug>.m3u8.
+const ANY_M3U8_PATTERN = /\.m3u8(\?|$)/i;
+
+export function isPlaylistM3u8(url, matchMode = "playlist") {
   if (!url || /\.mpd(\?|$)/i.test(url)) {
     return false;
   }
-  return M3U8_PATTERN.test(url);
+  const pattern = matchMode === "any" ? ANY_M3U8_PATTERN : PLAYLIST_M3U8_PATTERN;
+  return pattern.test(url);
 }
 
-// Resolves with the first playlist.m3u8 response observed on the page, or null
-// after playlistCaptureTimeoutMs. The response listener is always detached.
+// Resolves with the first m3u8 response observed on the page (per config.matchMode),
+// or null after playlistCaptureTimeoutMs. The response listener is always detached.
 function waitForPlaylistM3u8(page, config, log) {
   return new Promise((resolve) => {
     let settled = false;
@@ -23,7 +31,7 @@ function waitForPlaylistM3u8(page, config, log) {
         return;
       }
       const url = response.url();
-      if (isPlaylistM3u8(url)) {
+      if (isPlaylistM3u8(url, config.matchMode)) {
         settled = true;
         clearTimeout(timer);
         page.off("response", onResponse);
@@ -33,7 +41,7 @@ function waitForPlaylistM3u8(page, config, log) {
         } catch {
           host = undefined;
         }
-        log.info(`Observed playlist.m3u8 from ${host} (HTTP ${response.status()}).`);
+        log.info(`Observed m3u8 playlist from ${host} (HTTP ${response.status()}).`);
         resolve({ url, status: response.status() });
       }
     };
@@ -51,6 +59,7 @@ function waitForPlaylistM3u8(page, config, log) {
 
 export async function probeChannel(page, target, config, log) {
   const startedAt = Date.now();
+  const label = config.matchMode === "any" ? "m3u8" : "playlist.m3u8";
   let playlistUrl = null;
   let playlistHost = null;
   let lastStatus = null;
@@ -80,7 +89,7 @@ export async function probeChannel(page, target, config, log) {
     if (attempt < maxAttempts) {
       refreshes += 1;
       log.warn(
-        `${target.slug}: playlist.m3u8 returned ${lastStatus ?? "no response"} `
+        `${target.slug}: ${label} returned ${lastStatus ?? "no response"} `
         + `(attempt ${attempt}/${config.playlistMaxRetries}); refreshing.`,
       );
       // The reload for the next attempt happens at the top of the loop.
@@ -100,8 +109,8 @@ export async function probeChannel(page, target, config, log) {
     summary: healthy
       ? undefined
       : lastStatus === null
-        ? "No playlist.m3u8 response observed before the capture timeout"
-        : `playlist.m3u8 returned HTTP ${lastStatus} after ${refreshes} refresh(es)`,
+        ? `No ${label} response observed before the capture timeout`
+        : `${label} returned HTTP ${lastStatus} after ${refreshes} refresh(es)`,
     errors: [],
   };
 }

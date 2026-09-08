@@ -138,6 +138,10 @@ export function loadConfig() {
     navigationTimeoutMs: positiveInteger("NAVIGATION_TIMEOUT_MS", 60_000),
     playlistCaptureTimeoutMs: positiveInteger("PLAYLIST_CAPTURE_TIMEOUT_MS", 30_000),
     playlistMaxRetries: positiveInteger("PLAYLIST_MAX_RETRIES", 20),
+    // Match mode for the captured HLS url:
+    //   "playlist" (default) => only /playlist.m3u8 (5-hour workflow)
+    //   "any"                => any url ending in .m3u8 (2-hour iframe-embed workflow)
+    matchMode: process.env.PLAYLIST_MATCH_MODE?.trim().toLowerCase() === "any" ? "any" : "playlist",
     postTimeoutMs: positiveInteger("POST_TIMEOUT_MS", 30_000),
     reportEndpoint: process.env.HEALTH_REPORT_ENDPOINT?.trim() || undefined,
     reportPath: path.resolve(
