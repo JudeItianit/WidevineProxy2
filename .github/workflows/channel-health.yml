@@ -34,7 +34,10 @@ jobs:
       # BLOCKS DATACENTER egress — GitHub runner IPs get net::ERR_FAILED. Set these to a
       # residential/VPN proxy (e.g. socks5://host:1080) to unblock it. Credentials are
       # secrets; leave the server unset to run without a proxy.
-      PLAYWRIGHT_PROXY_SERVER: ${{ secrets.PLAYWRIGHT_PROXY_SERVER }}
+      # The proxy server prefers the secret but falls back to a repo VARIABLE: public
+      # proxies rotate often, and a variable is read/write so it can be refreshed without
+      # re-entering a write-only secret. Verified working: socks5://144.126.197.184:1088 (GB).
+      PLAYWRIGHT_PROXY_SERVER: ${{ secrets.PLAYWRIGHT_PROXY_SERVER || vars.PLAYWRIGHT_PROXY_SERVER }}
       PLAYWRIGHT_PROXY_USERNAME: ${{ secrets.PLAYWRIGHT_PROXY_USERNAME }}
       PLAYWRIGHT_PROXY_PASSWORD: ${{ secrets.PLAYWRIGHT_PROXY_PASSWORD }}
       PLAYWRIGHT_PROXY_BYPASS: ${{ vars.PLAYWRIGHT_PROXY_BYPASS }}

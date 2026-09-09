@@ -76,8 +76,16 @@ async function postReport(report, config) {
   if (!response.ok) {
     throw new Error(`Playlist report endpoint returned HTTP ${response.status}`);
   }
-  await response.arrayBuffer();
-  log.info("Playlist report delivered to the configured endpoint.");
+  const payload = await response.text();
+  log.info(`Playlist report delivered to the configured endpoint (HTTP ${response.status}).`);
+  if (payload) {
+    try {
+      const body = JSON.parse(payload);
+      log.info(`Endpoint result: ${JSON.stringify(body)}`);
+    } catch {
+      log.info(`Endpoint body: ${payload.slice(0, 200)}`);
+    }
+  }
 }
 
 async function main() {
