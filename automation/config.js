@@ -221,6 +221,17 @@ export function loadConfig() {
     playFallbackEnabled: booleanValue("PLAY_FALLBACK_ENABLED", false),
     postTimeoutMs: positiveInteger("POST_TIMEOUT_MS", 30_000),
     proxy: loadProxy(),
+    // When true, a channel whose video never starts is reported "degraded" instead of
+    // "healthy". Default false: the manifest (dice) URL answering HTTP 200 is what the
+    // backend publishes, so it is the real success signal. Chromium does play these
+    // streams, but Playwright's Firefox cannot decode them, so requiring playback would
+    // mark good manifests as degraded on Firefox only.
+    requirePlayback: booleanValue("REQUIRE_PLAYBACK", false),
+    // How long to keep waiting for playback AFTER the manifest is already captured, when
+    // playback is not required. Keeps runs fast instead of stalling for the full
+    // channelTimeoutMs on engines that cannot decode the stream. Ignored when
+    // REQUIRE_PLAYBACK=true or EXTRACT_KEYS=true (keys need the full license round-trip).
+    playbackGraceMs: nonNegativeInteger("PLAYBACK_GRACE_MS", 5_000),
     reportEndpoint: optionalWebUrl("HEALTH_REPORT_ENDPOINT", allowInsecureReport),
     reportPath: path.resolve(
       process.env.HEALTH_REPORT_PATH?.trim() || "artifacts/channel-health.json",

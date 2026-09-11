@@ -53,10 +53,20 @@ test("confirmed playback stays healthy with either configured player", () => {
     playbackInitialized: true,
     sourceSelected: true,
   }), "healthy");
+  // A good manifest is a healthy result by default: these streams are Widevine-encrypted
+  // and Playwright ships no CDM, so playback can never initialize here.
   assert.equal(determineChannelStatus({
     dash,
     playerReady: true,
     playbackInitialized: false,
+    sourceSelected: true,
+  }), "healthy");
+  // ...unless the caller explicitly demands playback (REQUIRE_PLAYBACK=true).
+  assert.equal(determineChannelStatus({
+    dash,
+    playerReady: true,
+    playbackInitialized: false,
+    requirePlayback: true,
     sourceSelected: true,
   }), "degraded");
   assert.equal(determineChannelStatus({

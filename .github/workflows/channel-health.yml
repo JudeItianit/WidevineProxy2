@@ -33,6 +33,14 @@ jobs:
       BROWSER_TYPE: ${{ vars.BROWSER_TYPE || 'chromium' }}
       # Optional normal-looking UA. Headless builds often advertise themselves.
       BROWSER_USER_AGENT: ${{ vars.BROWSER_USER_AGENT }}
+      # "degraded" only when the stream must actually play. Default false: the manifest
+      # (dice) URL answering HTTP 200 is the real success signal. Set true to restore the
+      # stricter behaviour where "no playback" is treated as a target-site problem.
+      REQUIRE_PLAYBACK: ${{ vars.REQUIRE_PLAYBACK }}
+      # How long (ms) to keep waiting for playback AFTER the manifest is captured, so a
+      # non-decoding engine cannot stall the run. Ignored when REQUIRE_PLAYBACK or
+      # EXTRACT_KEYS is enabled (key capture needs the full license round-trip).
+      PLAYBACK_GRACE_MS: ${{ vars.PLAYBACK_GRACE_MS }}
       CHANNEL_TIMEOUT_MS: "90000"
       FAIL_ON_UNHEALTHY: "false"
       HEADLESS: ${{ vars.HEADLESS_MODE || 'new' }}
@@ -67,7 +75,9 @@ jobs:
         run: npm install --no-audit --no-fund
 
       - name: Install Playwright browser dependencies
-        run: npx playwright install --with-deps chrome firefox
+        # Install ONLY the engine selected by BROWSER_TYPE. Fetching both costs ~90 MiB and
+        # a couple of minutes for a browser that is never launched.
+        run: npx playwright install --with-deps ${{ vars.BROWSER_TYPE == 'firefox' && 'firefox' || 'chrome' }}
 
       - name: Validate JavaScript
         run: npm run check

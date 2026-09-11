@@ -456,8 +456,14 @@ async function playbackSnapshot(page) {
   return snapshots;
 }
 
-async function waitForHealthSignal(page, diagnostics, timeoutMs) {
+async function waitForHealthSignal(page, diagnostics, timeoutMs, options = {}) {
+  const {
+    extractKeys = false,
+    playbackGraceMs = 5_000,
+    requirePlayback = false,
+  } = options;
   const startedAt = Date.now();
+  let dashSeenAt;
   let firstTimes;
   let latest = [];
 
@@ -478,6 +484,17 @@ async function waitForHealthSignal(page, diagnostics, timeoutMs) {
     if (diagnostics.errors.some(({ drmRelated }) => drmRelated) && dash) {
       return { initialized, snapshots: latest };
     }
+    // The manifest is already ours: give playback a short grace period, then stop waiting
+    // instead of burning the rest of channelTimeoutMs. Playwright's Firefox cannot decode
+    // these streams (Chromium can), so without this the loop stalls after we already have
+    // the only thing we came for. Key extraction is the exception — it needs the license
+    // round-trip to complete, so it keeps the full budget.
+    if (dash && !requirePlayback && !extractKeys) {
+      dashSeenAt ??= Date.now();
+      if (Date.now() - dashSeenAt >= playbackGraceMs) {
+        return { initialized, snapshots: latest };
+      }
+    }
     await delay(500);
   }
 
@@ -496,11 +513,22 @@ export function determineChannelStatus({
   playerReady,
   playbackInitialized,
   sourceSelected,
+  requirePlayback = false,
 }) {
   if (!sourceSelected || !dash || !dash.ok) {
     return "failed";
   }
   if (playerReady && playbackInitialized) {
+    return "healthy";
+  }
+  // The monitor's real job is to capture the manifest (dice) URL and confirm it answers
+  // HTTP 200 — that URL is what the backend publishes. Playback is a bonus signal, not the
+  // goal. NOTE: Chromium DOES play these streams, so on that engine "degraded" was a
+  // meaningful "the target site is actually broken" signal; but Playwright's Firefox cannot
+  // decode them (same class of problem as HEVC), so gating success on playback there would
+  // report a perfectly good manifest as degraded. Default: manifest 200 == healthy.
+  // Set requirePlayback (REQUIRE_PLAYBACK=true) to restore the stricter behaviour.
+  if (!requirePlayback) {
     return "healthy";
   }
   return "degraded";
@@ -563,11 +591,17 @@ export async function inspectCardForTargets(page, card, remainingTargets, config
     const initialWaitMs = config.playFallbackEnabled
       ? Math.min(config.playFallbackDelayMs, config.channelTimeoutMs)
       : config.channelTimeoutMs;
+    const waitOptions = {
+      extractKeys: config.extractKeys,
+      playbackGraceMs: config.playbackGraceMs,
+      requirePlayback: config.requirePlayback,
+    };
     let playback = sourceLabel
       ? await waitForHealthSignal(
         page,
         diagnostics,
         initialWaitMs,
+        waitOptions,
       )
       : { initialized: false, snapshots: [] };
 
@@ -588,12 +622,21 @@ export async function inspectCardForTargets(page, card, remainingTargets, config
       0,
       config.channelTimeoutMs - (Date.now() - playbackStartedAt),
     );
+    // Only keep waiting if something is genuinely still missing. Previously this waited
+    // again whenever playback had not initialized, which re-stalled the whole remaining
+    // budget even though the manifest was already captured.
     if (
       sourceLabel
       && remainingTimeoutMs > 0
-      && (!playback.initialized || !diagnostics.manifests.getDash())
+      && (!diagnostics.manifests.getDash()
+        || (config.requirePlayback && !playback.initialized))
     ) {
-      playback = await waitForHealthSignal(page, diagnostics, remainingTimeoutMs);
+      playback = await waitForHealthSignal(
+        page,
+        diagnostics,
+        remainingTimeoutMs,
+        waitOptions,
+      );
     }
     await diagnostics.stop();
 
@@ -607,13 +650,17 @@ export async function inspectCardForTargets(page, card, remainingTargets, config
       dash,
       playerReady: player.ready,
       playbackInitialized: playback.initialized,
+      requirePlayback: config.requirePlayback,
       sourceSelected: Boolean(sourceLabel),
     });
 
     const extractedKeyCount = extracted?.keys?.length ?? 0;
     const summary = drmErrors.length > 0
       ? `${drmErrors.length} DRM-related error(s) observed`
-      : dash && !playback.initialized
+      // Only a real problem when it actually downgraded the result. On engines that
+      // cannot decode the stream (Playwright Firefox) the manifest is still perfectly
+      // good, so reporting "did not initialize" next to status=healthy is nonsense.
+      : dash && !playback.initialized && status === "degraded"
         ? "DASH manifest available, but video did not initialize before the timeout"
         : extractedKeyCount > 0
           ? `Extracted ${extractedKeyCount} key(s) via local WVD device`
