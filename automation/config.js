@@ -194,6 +194,15 @@ export function loadConfig() {
   return {
     browserChannel,
     browserFallback: booleanValue("BROWSER_FALLBACK", true),
+    // Browser engine. "firefox" is a very different fingerprint from Chromium and is
+    // much harder for anti-bot/fingerprinting defences to sniff out; Chromium (and its
+    // CDP/automation surface) is the single most-targeted engine. Stealth evasions and
+    // a normal UA are applied on top in monitor.js.
+    browserType: enumValue("BROWSER_TYPE", ["chromium", "firefox"], "chromium"),
+    // Pin a specific browser binary. Useful when Playwright's expected build fails to
+    // start on a given machine (e.g. Firefox "Couldn't load XPCOM") but another cached
+    // build works. Leave unset to use Playwright's default for the engine.
+    executablePath: process.env.BROWSER_EXECUTABLE_PATH?.trim() || undefined,
     channelTimeoutMs: positiveInteger("CHANNEL_TIMEOUT_MS", 90_000),
     discoveryMaxPasses: positiveInteger("DISCOVERY_MAX_PASSES", 40),
     discoveryRetries: positiveInteger("DISCOVERY_RETRIES", 3),
@@ -219,6 +228,9 @@ export function loadConfig() {
     reportToken: process.env.HEALTH_REPORT_TOKEN?.trim() || undefined,
     sourceSettleMs: nonNegativeInteger("SOURCE_SETTLE_MS", 1_000),
     storageState: loadStorageState(),
+    // Normal-looking UA. Headless builds often advertise themselves (e.g. "Headless"),
+    // which is a free fingerprinting tell. Set this to a real desktop UA.
+    userAgent: process.env.BROWSER_USER_AGENT?.trim() || undefined,
     // Key extraction (opt-in). When enabled the monitor MITMs the EME exchange
     // with your local .wvd device to recover content keys. This is the same
     // mechanism the browser extension uses; it intentionally re-signs the

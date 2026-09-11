@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { chromium } from "playwright-extra";
+import { chromium, firefox } from "playwright-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
 
 import {
@@ -16,6 +16,22 @@ import { createKeyExtractor } from "./automation/key-extractor.js";
 import { installKeyExtractionHook } from "./automation/key-extraction-hook.js";
 
 chromium.use(StealthPlugin());
+// Firefox only gets the engine-agnostic evasions. The Chromium-specific ones are
+// pointless here and some are actively harmful:
+//   - user-agent-override throws on Firefox (no CDP), we set the UA via newContext instead
+//   - chrome.* / defaultArgs do not exist outside Chromium
+//   - navigator.vendor + webgl.vendor fake "Google Inc.", which on Firefox is an
+//     impossible fingerprint mismatch and would make us MORE conspicuous, not less.
+const FIREFOX_STEALTH_EVASIONS = new Set([
+  "navigator.webdriver",
+  "navigator.permissions",
+  "navigator.languages",
+  "navigator.hardwareConcurrency",
+  "window.outerdimensions",
+  "iframe.contentWindow",
+  "sourceurl",
+]);
+firefox.use(StealthPlugin({ enabledEvasions: FIREFOX_STEALTH_EVASIONS }));
 
 const log = {
   error(message) {
@@ -38,6 +54,46 @@ function publicErrorMessage(error) {
 async function launchBrowser(config) {
   const mode = config.headlessMode || "true";
   const headless = mode !== "false";
+
+  // Firefox is a completely different engine and fingerprint from Chromium, so the
+  // Chromium-targeted anti-bot heuristics (CDP surface, navigator.webdriver, the
+  // "HeadlessChrome" UA) simply do not apply. Stealth evasions are still layered on
+  // above, plus a normal UA and prefs that stop Firefox from mangling/blocking the
+  // requests we need to observe.
+  if (config.browserType === "firefox") {
+    const firefoxOptions = {
+      headless,
+      firefoxUserPrefs: {
+        // Hide the automation surface.
+        "dom.webdriver.enabled": false,
+        "useAutomationExtension": false,
+        // Firefox's own resistance/tracking protection can rewrite or block the very
+        // third-party requests we are trying to observe, so keep it out of the way.
+        "privacy.resistFingerprinting": false,
+        "privacy.trackingprotection.enabled": false,
+        "privacy.trackingprotection.pbmode.enabled": false,
+        // Autoplay without a user gesture so playback (and the manifest request) starts.
+        "media.autoplay.default": 0,
+        "media.autoplay.blocking_policy": 0,
+        "media.autoplay.allow-muted": true,
+        "media.eme.enabled": true,
+        "webgl.disabled": false,
+        "devtools.jsonview.enabled": false,
+      },
+    };
+
+    if (config.proxy) {
+      firefoxOptions.proxy = config.proxy;
+      log.info(`Routing the browser through proxy: ${config.proxy.server}`);
+    }
+    if (config.executablePath) {
+      firefoxOptions.executablePath = config.executablePath;
+      log.info(`Using pinned Firefox binary: ${config.executablePath}`);
+    }
+    log.info(`Launching Playwright Firefox (headless=${headless}).`);
+    return firefox.launch(firefoxOptions);
+  }
+
   const options = {
     args: ["--autoplay-policy=no-user-gesture-required"],
     headless,
@@ -118,6 +174,7 @@ async function main() {
       extraHTTPHeaders: config.extraHTTPHeaders,
       ignoreHTTPSErrors: config.ignoreHTTPSErrors,
       storageState: config.storageState,
+      userAgent: config.userAgent,
     });
     await context.addInitScript(installDrmObserver);
     const page = await context.newPage();

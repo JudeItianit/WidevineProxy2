@@ -20,9 +20,19 @@ concurrency:
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Firefox discovers notably more cards than Chromium (~93 vs ~46) and costs ~24s per
+    # inspected card (measured: 6 cards in 146s vs Chromium's 1 card in 62s). A full
+    # 12-channel sweep can therefore run long, so leave generous headroom — a timeout
+    # wastes the entire run, an unused ceiling costs nothing.
+    timeout-minutes: 60
     env:
       BROWSER_CHANNEL: chrome
+      # "chromium" (default) or "firefox". The site appears to fingerprint the browser
+      # rather than block IPs: Firefox is a very different engine/CDP surface and is far
+      # harder to sniff out. Verified locally: SKY SPORT 1 NZ healthy on Firefox, no proxy.
+      BROWSER_TYPE: ${{ vars.BROWSER_TYPE || 'chromium' }}
+      # Optional normal-looking UA. Headless builds often advertise themselves.
+      BROWSER_USER_AGENT: ${{ vars.BROWSER_USER_AGENT }}
       CHANNEL_TIMEOUT_MS: "90000"
       FAIL_ON_UNHEALTHY: "false"
       HEADLESS: ${{ vars.HEADLESS_MODE || 'new' }}
@@ -30,10 +40,10 @@ jobs:
       HEALTH_REPORT_ENDPOINT: ${{ secrets.HEALTH_REPORT_ENDPOINT }}
       HEALTH_REPORT_TOKEN: ${{ secrets.HEALTH_REPORT_TOKEN }}
       PLAYWRIGHT_STORAGE_STATE_BASE64: ${{ secrets.PLAYWRIGHT_STORAGE_STATE_BASE64 }}
-      # The site's stream resolution (obfuscated POST chain, vesper.heytheredelilah.xyz)
-      # BLOCKS DATACENTER egress — GitHub runner IPs get net::ERR_FAILED. Set these to a
-      # residential/VPN proxy (e.g. socks5://host:1080) to unblock it. Credentials are
-      # secrets; leave the server unset to run without a proxy.
+      # Stream resolution is gated mainly by ANTI-BOT/FINGERPRINTING, not (only) by IP:
+      # headless Chromium on a runner can fail while Firefox passes with no proxy at all.
+      # Prefer switching BROWSER_TYPE to firefox first; a proxy is the belt-and-braces
+      # fallback. Credentials are secrets; leave the server unset to run without a proxy.
       # The proxy server prefers the secret but falls back to a repo VARIABLE: public
       # proxies rotate often, and a variable is read/write so it can be refreshed without
       # re-entering a write-only secret. Verified working: socks5://144.126.197.184:1088 (GB).
@@ -56,8 +66,8 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Install Playwright Chromium dependencies
-        run: npx playwright install --with-deps chrome
+      - name: Install Playwright browser dependencies
+        run: npx playwright install --with-deps chrome firefox
 
       - name: Validate JavaScript
         run: npm run check
