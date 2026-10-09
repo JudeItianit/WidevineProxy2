@@ -137,7 +137,7 @@ export function loadConfig() {
     ignoreHTTPSErrors: booleanValue("IGNORE_HTTPS_ERRORS", false),
     navigationTimeoutMs: positiveInteger("NAVIGATION_TIMEOUT_MS", 60_000),
     playlistCaptureTimeoutMs: positiveInteger("PLAYLIST_CAPTURE_TIMEOUT_MS", 30_000),
-    playlistMaxRetries: positiveInteger("PLAYLIST_MAX_RETRIES", 20),
+    playlistMaxRetries: positiveInteger("PLAYLIST_MAX_RETRIES", 15),
     // Match mode for the captured HLS url:
     //   "playlist" (default) => only /playlist.m3u8 (5-hour workflow)
     //   "any"                => any url ending in .m3u8 (2-hour iframe-embed workflow)

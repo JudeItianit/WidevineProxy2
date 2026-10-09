@@ -86,6 +86,13 @@ export async function probeChannel(page, target, config, log) {
     }
 
     lastStatus = captured?.status ?? null;
+    if (lastStatus === 429) {
+      log.warn(
+        `${target.slug}: ${label} returned HTTP 429; rate limited/blocked, skipping remaining retries.`,
+      );
+      break;
+    }
+
     if (attempt < maxAttempts) {
       refreshes += 1;
       log.warn(
@@ -108,6 +115,8 @@ export async function probeChannel(page, target, config, log) {
     retriesUsed: refreshes,
     summary: healthy
       ? undefined
+      : lastStatus === 429
+        ? `${label} was rate limited/blocked (HTTP 429) after ${refreshes} refresh(es)`
       : lastStatus === null
         ? `No ${label} response observed before the capture timeout`
         : `${label} returned HTTP ${lastStatus} after ${refreshes} refresh(es)`,
