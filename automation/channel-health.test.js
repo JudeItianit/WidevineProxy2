@@ -15,6 +15,8 @@ import {
 } from "./channel-health.js";
 import { collectDrmLifecycle } from "./drm-observer.js";
 import { ManifestTracker } from "./manifest-tracker.js";
+import { probeChannel } from "./channel-playlist.js";
+import { loadConfig as loadPlaylistConfig } from "./playlist-config.js";
 
 test("channel names are normalized without confusing numbered ESPN channels", () => {
   assert.equal(normalizeName(" Sky-Sport 7 (NZ) "), "SKY SPORT 7 NZ");
@@ -186,4 +188,68 @@ test("the final channel summary separates successful, failed, and unavailable ch
     "Unavailable - channel does not exist yet [manifest.available=false] (1): ESPN NZ",
     "Degraded - manifest found but playback was incomplete (1): SKY SPORT 5 NZ",
   ]);
+});
+
+test("playlist capture short-circuits retries on HTTP 429", async () => {
+  let responseListener;
+  let gotoCount = 0;
+  let reloadCount = 0;
+  const response = {
+    status: () => 429,
+    url: () => "https://media.example/playlist.m3u8",
+  };
+  const page = {
+    goto: () => {
+      gotoCount += 1;
+      return new Promise((resolve) => {
+        setImmediate(() => {
+          responseListener?.(response);
+          resolve();
+        });
+      });
+    },
+    off: () => {},
+    on: (_event, listener) => {
+      responseListener = listener;
+    },
+    reload: () => {
+      reloadCount += 1;
+      return Promise.resolve();
+    },
+  };
+  const result = await probeChannel(
+    page,
+    { slug: "bein-sports-2-tr", url: "https://example.test/channel" },
+    {
+      matchMode: "playlist",
+      navigationTimeoutMs: 1_000,
+      playlistCaptureTimeoutMs: 1_000,
+      playlistMaxRetries: 20,
+    },
+    { info: () => {}, warn: () => {} },
+  );
+
+  assert.equal(gotoCount, 1);
+  assert.equal(reloadCount, 0);
+  assert.equal(result.status, "failed");
+  assert.equal(result.httpStatus, 429);
+  assert.equal(result.retriesUsed, 0);
+  assert.match(result.summary, /rate limited\/blocked \(HTTP 429\)/);
+});
+
+test("playlist max retries default to 15 while allowing env override", () => {
+  const previous = process.env.PLAYLIST_MAX_RETRIES;
+  try {
+    delete process.env.PLAYLIST_MAX_RETRIES;
+    assert.equal(loadPlaylistConfig().playlistMaxRetries, 15);
+
+    process.env.PLAYLIST_MAX_RETRIES = "6";
+    assert.equal(loadPlaylistConfig().playlistMaxRetries, 6);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.PLAYLIST_MAX_RETRIES;
+    } else {
+      process.env.PLAYLIST_MAX_RETRIES = previous;
+    }
+  }
 });
