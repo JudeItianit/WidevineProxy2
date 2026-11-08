@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   monitor:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Firefox discovers notably more cards than Chromium (~93 vs ~46) and costs ~24s per
     # inspected card (measured: 6 cards in 146s vs Chromium's 1 card in 62s). A full
     # 12-channel sweep can therefore run long, so leave generous headroom — a timeout
